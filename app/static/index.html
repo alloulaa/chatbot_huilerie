@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chatbot Huilerie - Prototype enrichi</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f7fb; margin:0; }
+    .wrap { max-width: 1100px; margin: 24px auto; display:grid; grid-template-columns: 300px 1fr; gap:20px; }
+    .card { background:#fff; border-radius:16px; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,.08); }
+    h1 { margin:0 0 8px; font-size:26px; }
+    .muted { color:#666; font-size:14px; }
+    #messages { height: 540px; overflow:auto; padding:12px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb; }
+    .msg { margin:10px 0; padding:12px 14px; border-radius:14px; max-width:80%; white-space:pre-wrap; }
+    .user { background:#dbeafe; margin-left:auto; }
+    .bot { background:#ecfeef; }
+    .meta { font-size:12px; color:#666; margin-top:5px; }
+    .row { display:flex; gap:8px; margin-top:12px; }
+    input, select, button { border-radius:10px; border:1px solid #cbd5e1; padding:10px 12px; font-size:14px; }
+    input { flex:1; }
+    button { background:#111827; color:#fff; cursor:pointer; }
+    .quick button { width:100%; text-align:left; margin-bottom:8px; background:#fff; color:#111827; }
+    .small { font-size:13px; }
+    .badge { display:inline-block; padding:4px 8px; border-radius:999px; background:#eef2ff; font-size:12px; margin:3px 3px 0 0; }
+    pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:12px; overflow:auto; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Chatbot Huilerie</h1>
+      <div class="muted">Prototype enrichi : intentions métier, contexte conversationnel, rôle utilisateur, alertes et prédictions.</div>
+      <div style="margin-top:12px;">
+        <label class="small">Utilisateur de test</label>
+        <select id="userId">
+          <option value="1">1 - Direction (global)</option>
+          <option value="2">2 - Responsable Nour</option>
+          <option value="3">3 - Maintenance Nour</option>
+          <option value="4">4 - Qualité Sahel</option>
+        </select>
+      </div>
+      <div style="margin-top:16px;" class="quick">
+        <div class="small muted">Exemples rapides</div>
+        <button onclick="fillQ('Quelle est la production de l\'huilerie Nour ce mois-ci ?')">Production Nour ce mois-ci</button>
+        <button onclick="fillQ('Quel est le stock actuel d\'huile vierge extra ?')">Stock vierge extra</button>
+        <button onclick="fillQ('Quelle machine a eu le plus de pannes ce mois-ci ?')">Machine la plus en panne</button>
+        <button onclick="fillQ('Donne-moi les KPI globaux de cette semaine')">KPI globaux</button>
+        <button onclick="fillQ('Donne-moi les lots non conformes ce mois-ci')">Lots non conformes</button>
+        <button onclick="fillQ('Quelles sont les alertes actives ?')">Alertes actives</button>
+        <button onclick="fillQ('Prédire la qualité du lot L202')">Prédiction qualité lot</button>
+        <button onclick="fillQ('Explique la prédiction du lot L202')">Explication prédiction</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="messages"></div>
+      <div class="row">
+        <input id="messageInput" placeholder="Posez une question métier..." />
+        <button onclick="sendMessage()">Envoyer</button>
+      </div>
+      <div class="muted" style="margin-top:10px;">
+        Suggestions : <span class="badge">production</span><span class="badge">stock</span><span class="badge">rendement</span><span class="badge">pannes</span><span class="badge">qualité</span><span class="badge">alertes</span><span class="badge">prédiction</span>
+      </div>
+      <div id="details" style="margin-top:16px;"></div>
+    </div>
+  </div>
+
+  <script>
+    const sessionId = 'web-demo-session';
+    const messagesEl = document.getElementById('messages');
+    const detailsEl = document.getElementById('details');
+
+    function addMessage(text, sender, meta='') {
+      const div = document.createElement('div');
+      div.className = 'msg ' + sender;
+      div.innerHTML = `<div>${text}</div>${meta ? `<div class="meta">${meta}</div>` : ''}`;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function fillQ(q) {
+      document.getElementById('messageInput').value = q;
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('messageInput');
+      const message = input.value.trim();
+      if (!message) return;
+      const userId = Number(document.getElementById('userId').value);
+      addMessage(message, 'user');
+      input.value = '';
+
+      const res = await fetch('/chat/ask', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ message, user_id: userId, session_id: sessionId })
+      });
+      const data = await res.json();
+      addMessage(data.response, 'bot', `Intent: ${data.intent} | Confiance: ${data.confidence} | Portée: ${JSON.stringify(data.applied_scope)}`);
+      detailsEl.innerHTML = `<div class="small muted">Dernier résultat structuré</div><pre>${JSON.stringify(data.data, null, 2)}</pre>`;
+    }
+
+    addMessage("Bonjour. Je suis prêt à répondre sur la production, le stock, la qualité, les machines, les alertes et les prédictions simples.", 'bot');
+  </script>
+</body>
+</html>
