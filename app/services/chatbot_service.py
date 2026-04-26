@@ -60,19 +60,38 @@ class ChatbotService:
 
         return "Inconnue"
 
-    def get_stock(self) -> dict[str, Any]:
+    def get_stock(
+        self,
+        huilerie: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
         query = """
-            SELECT variete, SUM(quantite_restante) AS total_stock
-            FROM lot_olives
-            GROUP BY variete
-            ORDER BY variete
+            SELECT s.variete, SUM(s.quantite_disponible) AS total_stock
+            FROM stock s
+            LEFT JOIN lot_olives lo ON lo.id_lot = s.lot_id
+            LEFT JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            WHERE 1=1
         """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        if start_date and end_date:
+            query += " AND lo.date_reception BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+        query += " GROUP BY s.variete ORDER BY s.variete"
+
         connection = None
         cursor = None
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute(query)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 
             normalized = []
@@ -94,17 +113,38 @@ class ChatbotService:
             if connection is not None and connection.is_connected():
                 connection.close()
 
-    def get_production(self) -> dict[str, Any]:
+    def get_production(
+        self,
+        huilerie: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
         query = """
-            SELECT SUM(quantite_produite) AS total_production
-            FROM produit_final
+            SELECT SUM(pf.quantite_produite) AS total_production
+            FROM produit_final pf
+            JOIN execution_production ep ON ep.id_execution_production = pf.execution_production_id
+            JOIN lot_olives lo ON lo.id_lot = ep.lot_olives_id
+            JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            WHERE 1=1
         """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        if start_date and end_date:
+            query += " AND pf.date_production BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+
         connection = None
         cursor = None
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute(query)
+            cursor.execute(query, tuple(params))
             row = cursor.fetchone()
             value = self._to_float(row.get("total_production") if row else None, 0.0)
             return {"value": value}
@@ -117,17 +157,38 @@ class ChatbotService:
             if connection is not None and connection.is_connected():
                 connection.close()
 
-    def get_machines(self) -> dict[str, Any]:
+    def get_machines(
+        self,
+        huilerie: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
         query = """
-            SELECT *
-            FROM vue_machines_probleme
+            SELECT DISTINCT m.nom_machine, m.etat_machine
+            FROM machine m
+            JOIN huilerie h ON h.id_huilerie = m.huilerie_id
+            LEFT JOIN execution_production ep ON ep.machine_id = m.id_machine
+            WHERE LOWER(COALESCE(m.etat_machine, '')) IN ('maintenance', 'surveillance', 'en panne', 'panne')
         """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        if start_date and end_date:
+            query += " AND ep.date_debut BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+        query += " ORDER BY m.nom_machine"
+
         connection = None
         cursor = None
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute(query)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 
             normalized = []
@@ -146,17 +207,37 @@ class ChatbotService:
             if connection is not None and connection.is_connected():
                 connection.close()
 
-    def get_rendement(self) -> dict[str, Any]:
+    def get_rendement(
+        self,
+        huilerie: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
         query = """
-            SELECT AVG(rendement) AS rendement_moyen
-            FROM execution_production
+            SELECT AVG(ep.rendement) AS rendement_moyen
+            FROM execution_production ep
+            JOIN lot_olives lo ON lo.id_lot = ep.lot_olives_id
+            JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            WHERE 1=1
         """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        if start_date and end_date:
+            query += " AND ep.date_debut BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+
         connection = None
         cursor = None
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute(query)
+            cursor.execute(query, tuple(params))
             row = cursor.fetchone()
             value = self._to_float(row.get("rendement_moyen") if row else None, 0.0)
             return {"value": value}
@@ -169,19 +250,40 @@ class ChatbotService:
             if connection is not None and connection.is_connected():
                 connection.close()
 
-    def get_prediction(self) -> dict[str, Any]:
+    def get_prediction(
+        self,
+        huilerie: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
         query = """
             SELECT
-                AVG(rendement_predit_pourcent) AS rendement_predit,
-                AVG(quantite_huile_recalculee_litres) AS quantite_estimee
-            FROM prediction
+                AVG(p.rendement_predit_pourcent) AS rendement_predit,
+                AVG(p.quantite_huile_recalculee_litres) AS quantite_estimee
+            FROM prediction p
+            JOIN execution_production ep ON ep.id_execution_production = p.execution_production_id
+            JOIN lot_olives lo ON lo.id_lot = ep.lot_olives_id
+            JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            WHERE 1=1
         """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        if start_date and end_date:
+            query += " AND ep.date_debut BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+
         connection = None
         cursor = None
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute(query)
+            cursor.execute(query, tuple(params))
             row = cursor.fetchone()
 
             rendement_predit = self._to_float(row.get("rendement_predit") if row else None, 0.0)
@@ -197,18 +299,39 @@ class ChatbotService:
             if connection is not None and connection.is_connected():
                 connection.close()
 
-    def get_qualite(self) -> dict[str, Any]:
+    def get_qualite(
+        self,
+        huilerie: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
         query = """
-            SELECT qualite, COUNT(*) AS total
-            FROM produit_final
-            GROUP BY qualite
+            SELECT pf.qualite, COUNT(*) AS total
+            FROM produit_final pf
+            JOIN execution_production ep ON ep.id_execution_production = pf.execution_production_id
+            JOIN lot_olives lo ON lo.id_lot = ep.lot_olives_id
+            JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            WHERE 1=1
         """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        if start_date and end_date:
+            query += " AND pf.date_production BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+        query += " GROUP BY pf.qualite"
+
         connection = None
         cursor = None
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute(query)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 
             normalized = []
@@ -248,17 +371,37 @@ class ChatbotService:
             if connection is not None and connection.is_connected():
                 connection.close()
 
-    def diagnostic_qualite(self) -> dict[str, Any]:
+    def diagnostic_qualite(
+        self,
+        huilerie: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
         query = """
-            SELECT acidite_huile_pourcent, indice_peroxyde_meq_o2_kg, k270
-            FROM analyse_laboratoire
+            SELECT al.acidite_huile_pourcent, al.indice_peroxyde_meq_o2_kg, al.k270
+            FROM analyse_laboratoire al
+            JOIN lot_olives lo ON lo.id_lot = al.lot_id
+            JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            WHERE 1=1
         """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        if start_date and end_date:
+            query += " AND al.date_analyse BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+
         connection = None
         cursor = None
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute(query)
+            cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 
             issues: list[str] = []
