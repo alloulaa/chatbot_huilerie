@@ -4,8 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header
 
 from app.models import ChatRequest, ChatResponse
-from app.nlp.entity_extractor import EntityExtractor
-from app.nlp.intent_detector import detect_intent
+from app.nlp.analyseur_llm import analyser_message_sync
 from app.nlp.normalizer import resolve_period
 from app.services.chatbot_service import ChatbotService
 from app.services.permission_service import (
@@ -20,8 +19,7 @@ from app.services.permission_service import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatbotService()
-extractor = EntityExtractor()
-SESSION_CONTEXT: dict[str, dict[str, str]] = {}
+CONTEXTE_SESSION: dict[str, dict] = {}
 
 
 def _fmt_number(value: float | int | None, decimals: int = 0) -> str:
@@ -74,115 +72,130 @@ def ask_chatbot(
         user_enterprise_id = get_user_enterprise_id(auth_data)
         applied_permissions = auth_data.get("permissions", [])
 
-    intent, confidence = detect_intent(payload.message)
-    entities = extractor.extract(payload.message)
+    resultat = analyser_message_sync(payload.message)
+    intention = str(resultat.get("intention") or "inconnu").strip().lower()
+    try:
+        confiance = float(resultat.get("confiance", 0.5))
+    except (TypeError, ValueError):
+        confiance = 0.5
+    confiance = max(0.0, min(1.0, confiance))
+
+    huilerie = resultat.get("huilerie")
+    label_periode = resultat.get("periode")
+    type_huile = resultat.get("type_huile")
+    variete = resultat.get("variete")
+    code_lot = resultat.get("code_lot")
+
+    contexte = CONTEXTE_SESSION.get(payload.session_id, {})
+    if not huilerie and contexte.get("derniere_huilerie"):
+        huilerie = contexte["derniere_huilerie"]
+    if not label_periode and contexte.get("derniere_periode"):
+        label_periode = contexte["derniere_periode"]
+
+    if user_huilerie and not user_is_admin:
+        huilerie = user_huilerie
+
+    date_debut, date_fin, texte_periode = resolve_period(label_periode)
+
+    CONTEXTE_SESSION[payload.session_id] = {
+        "derniere_huilerie": huilerie,
+        "derniere_periode": label_periode,
+    }
+
+    entites = {
+        "huilerie": huilerie,
+        "periode": label_periode,
+        "type_huile": type_huile,
+        "variete": variete,
+        "code_lot": code_lot,
+    }
 
     if effective_jwt and auth_data and not user_is_admin and not auth_data.get("_auth_unavailable"):
         permissions = auth_data.get("permissions", [])
-        if not is_intent_allowed(intent, permissions):
+        if not is_intent_allowed(intention, permissions):
             return ChatResponse(
-                intent=intent,
-                confidence=confidence,
-                entities=entities,
+                intent=intention,
+                confidence=confiance,
+                entities=entites,
                 response="Acces refuse",
                 data=None,
                 applied_scope=None,
                 applied_permissions=permissions,
             )
 
-    session_ctx = SESSION_CONTEXT.get(payload.session_id, {})
-    explicit_huilerie = entities.get("huilerie")
-    explicit_period = entities.get("period_label")
-
-    huilerie = explicit_huilerie or session_ctx.get("last_huilerie")
-    period_label = explicit_period or session_ctx.get("last_period") or "today"
-
-    if user_huilerie and not user_is_admin:
-        huilerie = user_huilerie
-
-    used_context_huilerie = explicit_huilerie is None and bool(session_ctx.get("last_huilerie"))
-    used_context_period = explicit_period is None and bool(session_ctx.get("last_period"))
-
-    start_date, end_date, period_text = resolve_period(period_label)
-
-    SESSION_CONTEXT[payload.session_id] = {
-        "last_huilerie": huilerie or "",
-        "last_period": period_label,
-    }
-
-    context_note = ""
-    if used_context_huilerie or used_context_period:
-        huilerie_ctx = huilerie if huilerie else "toutes huileries"
-        context_note = f" (contexte : huilerie {huilerie_ctx}, {period_text})"
+    note_contexte = ""
+    if contexte:
+        huilerie_contexte = huilerie if huilerie else "toutes huileries"
+        note_contexte = f" (contexte: huilerie {huilerie_contexte}, {texte_periode})"
 
     enterprise_scoped = bool(auth_data and user_enterprise_id is not None)
-    scope_text = _build_scope_text(huilerie, period_text, enterprise_scoped)
+    scope_text = _build_scope_text(huilerie, texte_periode, enterprise_scoped)
 
-    if intent == "stock":
-        result = service.get_stock(huilerie, start_date, end_date, user_enterprise_id)
+    if intention == "stock":
+        result = service.get_stock(huilerie=huilerie, start_date=date_debut, end_date=date_fin, enterprise_id=user_enterprise_id)
         rows = result.get("value") or []
         if not rows:
-            response_text = f"Aucune donnee pour {period_text}.{context_note}"
+            response_text = f"Aucune donnee pour {texte_periode}.{note_contexte}"
         else:
             details = []
             for row in rows:
                 variete = row.get("variete") or "Inconnue"
                 quantite = row.get("total_stock", 0)
                 details.append(f"- {variete} : {_fmt_number(quantite, 0)} kg")
-            response_text = f"Stock {scope_text} :\n" + "\n".join(details) + context_note
+            response_text = f"Stock {scope_text} :\n" + "\n".join(details) + note_contexte
         response_data = rows
-    elif intent == "production":
-        result = service.get_production(huilerie, start_date, end_date, user_enterprise_id)
+    elif intention == "production":
+        result = service.get_production(huilerie=huilerie, start_date=date_debut, end_date=date_fin, enterprise_id=user_enterprise_id)
         total = result.get("value", 0)
         if total <= 0:
-            response_text = f"Aucune donnee pour {period_text}.{context_note}"
+            response_text = f"Aucune donnee pour {texte_periode}.{note_contexte}"
         else:
-            response_text = f"La quantite d'huile produite {scope_text} est de {_fmt_number(total, 0)} litres{context_note}"
+            response_text = f"La quantite d'huile produite {scope_text} est de {_fmt_number(total, 0)} litres{note_contexte}"
         response_data = {"total_production": total}
-    elif intent == "machine":
-        result = service.get_machines(huilerie, start_date, end_date, user_enterprise_id)
+    elif intention == "machine":
+        result = service.get_machines(huilerie=huilerie, start_date=date_debut, end_date=date_fin, enterprise_id=user_enterprise_id)
         rows = result.get("value") or []
         if not rows:
-            response_text = f"Toutes les machines sont en bon etat {scope_text}{context_note}"
+            response_text = f"Toutes les machines sont en bon etat {scope_text}{note_contexte}"
         else:
             details = [f"{row.get('nom_machine')} ({row.get('etat_machine')})" for row in rows]
-            response_text = f"Machines necessitant attention {scope_text} : " + ", ".join(details) + context_note
+            response_text = f"Machines necessitant attention {scope_text} : " + ", ".join(details) + note_contexte
         response_data = rows
-    elif intent == "rendement":
-        result = service.get_rendement(huilerie, start_date, end_date, user_enterprise_id)
+    elif intention == "rendement":
+        result = service.get_rendement(huilerie=huilerie, start_date=date_debut, end_date=date_fin, enterprise_id=user_enterprise_id)
         rendement = result.get("value", 0)
         if rendement <= 0:
-            response_text = f"Aucune donnee pour {period_text}.{context_note}"
+            response_text = f"Aucune donnee pour {texte_periode}.{note_contexte}"
         else:
-            response_text = f"Le rendement moyen reel {scope_text} est de {_fmt_number(rendement, 1)} %{context_note}"
+            response_text = f"Le rendement moyen reel {scope_text} est de {_fmt_number(rendement, 1)} %{note_contexte}"
         response_data = {"rendement_moyen": rendement}
-    elif intent == "prediction":
-        result = service.get_prediction(huilerie, start_date, end_date, user_enterprise_id)
+    elif intention == "prediction":
+        result = service.get_prediction(huilerie=huilerie, start_date=date_debut, end_date=date_fin, enterprise_id=user_enterprise_id)
         rendement = result.get("rendement_predit", 0)
         quantite = result.get("quantite_estimee", 0)
         if rendement <= 0 and quantite <= 0:
-            response_text = f"Aucune donnee pour {period_text}.{context_note}"
+            response_text = f"Aucune donnee pour {texte_periode}.{note_contexte}"
         else:
             response_text = (
                 f"Le rendement predit {scope_text} est de {_fmt_number(rendement, 1)} % "
-                f"avec une production estimee de {_fmt_number(quantite, 0)} litres{context_note}"
+                f"avec une production estimee de {_fmt_number(quantite, 0)} litres{note_contexte}"
             )
         response_data = result
-    elif intent == "qualite":
-        result = service.get_qualite(huilerie, start_date, end_date, user_enterprise_id)
+    elif intention == "qualite":
+        result = service.get_qualite(huilerie=huilerie, start_date=date_debut, end_date=date_fin, enterprise_id=user_enterprise_id)
         rows = result.get("value") or []
         summary = result.get("summary") or {}
 
         if not rows:
-            response_text = f"Aucune donnee pour {period_text}.{context_note}"
+            response_text = f"Aucune donnee pour {texte_periode}.{note_contexte}"
             response_data = {"details": rows, "summary": summary}
             return ChatResponse(
-                intent=intent,
-                confidence=confidence,
-                entities=entities,
+                intent=intention,
+                confidence=confiance,
+                entities=entites,
                 response=response_text,
                 data=response_data,
-                applied_scope={"huilerie": huilerie, "enterprise_id": user_enterprise_id, "period_label": period_label, "start_date": start_date, "end_date": end_date},
+                applied_scope={"huilerie": huilerie, "enterprise_id": user_enterprise_id, "period_label": label_periode or "aujourd_hui", "start_date": date_debut, "end_date": date_fin},
                 applied_permissions=applied_permissions,
             )
 
@@ -196,32 +209,32 @@ def ask_chatbot(
         )
         if inconnue > 0:
             response_text += f", Inconnue ({inconnue})"
-        response_text += context_note
+        response_text += note_contexte
 
         response_data = {
             "details": rows,
             "summary": summary,
         }
-    elif intent == "diagnostic":
-        result = service.diagnostic_qualite(huilerie, start_date, end_date, user_enterprise_id)
+    elif intention == "diagnostic":
+        result = service.diagnostic_qualite(huilerie=huilerie, start_date=date_debut, end_date=date_fin, enterprise_id=user_enterprise_id)
         issues = result.get("issues") or []
         rows = result.get("rows") or []
         if not rows:
-            response_text = f"Aucune donnee pour {period_text}.{context_note}"
+            response_text = f"Aucune donnee pour {texte_periode}.{note_contexte}"
             response_data = result
             return ChatResponse(
-                intent=intent,
-                confidence=confidence,
-                entities=entities,
+                intent=intention,
+                confidence=confiance,
+                entities=entites,
                 response=response_text,
                 data=response_data,
-                applied_scope={"huilerie": huilerie, "enterprise_id": user_enterprise_id, "period_label": period_label, "start_date": start_date, "end_date": end_date},
+                applied_scope={"huilerie": huilerie, "enterprise_id": user_enterprise_id, "period_label": label_periode or "aujourd_hui", "start_date": date_debut, "end_date": date_fin},
                 applied_permissions=applied_permissions,
             )
         if issues:
-            response_text = f"La qualite est faible {scope_text} en raison de : " + ", ".join(issues) + context_note
+            response_text = f"La qualite est faible {scope_text} en raison de : " + ", ".join(issues) + note_contexte
         else:
-            response_text = f"Tous les parametres sont conformes {scope_text}{context_note}"
+            response_text = f"Tous les parametres sont conformes {scope_text}{note_contexte}"
         response_data = result
     else:
         logger.info("Intent non reconnue pour le message: %s", payload.message)
@@ -229,11 +242,11 @@ def ask_chatbot(
         response_data = None
 
     return ChatResponse(
-        intent=intent,
-        confidence=confidence,
-        entities=entities,
+        intent=intention,
+        confidence=confiance,
+        entities=entites,
         response=response_text,
         data=response_data,
-        applied_scope={"huilerie": huilerie, "enterprise_id": user_enterprise_id, "period_label": period_label, "start_date": start_date, "end_date": end_date},
+        applied_scope={"huilerie": huilerie, "enterprise_id": user_enterprise_id, "period_label": label_periode or "aujourd_hui", "start_date": date_debut, "end_date": date_fin},
         applied_permissions=applied_permissions,
     )

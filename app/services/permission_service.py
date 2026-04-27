@@ -29,7 +29,7 @@ def _backend_base_urls() -> list[str]:
     urls = []
     if custom:
         urls.append(custom.rstrip("/"))
-    urls.extend(["http://localhost:8500", "http://localhost:8000"])
+    urls.append("http://localhost:8000")
     # Preserve order and remove duplicates.
     return list(dict.fromkeys(urls))
 

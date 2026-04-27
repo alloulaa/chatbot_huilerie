@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Hôte : 127.0.0.1
--- Généré le : sam. 25 avr. 2026 à 18:45
+-- Généré le : lun. 27 avr. 2026 à 17:37
 -- Version du serveur : 10.4.22-MariaDB
 -- Version de PHP : 8.1.2
 
@@ -96,6 +96,13 @@ CREATE TABLE `employe` (
   `huilerie_id_emp` bigint(20) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+--
+-- Déchargement des données de la table `employe`
+--
+
+INSERT INTO `employe` (`id_employe`, `id_utilisateur`, `huilerie_id_emp`) VALUES
+(4, 4, 1);
+
 -- --------------------------------------------------------
 
 --
@@ -177,15 +184,25 @@ CREATE TABLE `execution_production` (
   `statut` varchar(255) NOT NULL,
   `guide_production_id` bigint(20) NOT NULL,
   `lot_olives_id` bigint(20) NOT NULL,
-  `machine_id` bigint(20) NOT NULL
+  `machine_id` bigint(20) NOT NULL,
+  `acidite_olives_pourcent` double DEFAULT NULL,
+  `duree_malaxage_min` double DEFAULT NULL,
+  `humidite_pourcent` double DEFAULT NULL,
+  `methode_recolte` varchar(255) DEFAULT NULL,
+  `pression_extraction_bar` double DEFAULT NULL,
+  `region` varchar(255) DEFAULT NULL,
+  `taux_feuilles_pourcent` double DEFAULT NULL,
+  `temperature_malaxagec` double DEFAULT NULL,
+  `type_sol` varchar(255) DEFAULT NULL,
+  `vitesse_decanteur_tr_min` double DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 --
 -- Déchargement des données de la table `execution_production`
 --
 
-INSERT INTO `execution_production` (`id_execution_production`, `controle_temperature`, `date_debut`, `date_fin_prevue`, `date_fin_reelle`, `observations`, `reference`, `rendement`, `statut`, `guide_production_id`, `lot_olives_id`, `machine_id`) VALUES
-(10, b'0', '2026-04-25', '2026-04-26', '2026-04-25', '', 'EXE-LO07-G1-M8-20260425154341287', 0, 'TERMINEE', 1, 7, 8);
+INSERT INTO `execution_production` (`id_execution_production`, `controle_temperature`, `date_debut`, `date_fin_prevue`, `date_fin_reelle`, `observations`, `reference`, `rendement`, `statut`, `guide_production_id`, `lot_olives_id`, `machine_id`, `acidite_olives_pourcent`, `duree_malaxage_min`, `humidite_pourcent`, `methode_recolte`, `pression_extraction_bar`, `region`, `taux_feuilles_pourcent`, `temperature_malaxagec`, `type_sol`, `vitesse_decanteur_tr_min`) VALUES
+(10, b'0', '2026-04-25', '2026-04-26', '2026-04-25', '', 'EXE-LO07-G1-M8-20260425154341287', 0, 'TERMINEE', 1, 7, 8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 -- --------------------------------------------------------
 
@@ -279,7 +296,13 @@ CREATE TABLE `lot_olives` (
 
 INSERT INTO `lot_olives` (`id_lot`, `acidite_olives_pourcent`, `bon_pesee_pdf_path`, `date_reception`, `date_recolte`, `duree_stockage_avant_broyage`, `fournisseurcin`, `fournisseur_nom`, `humidite_pourcent`, `lavage_effectue`, `maturite`, `methode_recolte`, `origine`, `pesee`, `quantite_initiale`, `quantite_restante`, `reference`, `region`, `taux_feuilles_pourcent`, `temps_depuis_recolte_heures`, `type_sol`, `variete`, `campagne_id`, `huilerie_id`, `matiere_premiere_id`) VALUES
 (7, 5, 'generated/bons-pesee/bon-pesee-LO07.pdf', '2026-04-25', '2026-04-25', 1, 'fffffff', 'ggggggggggggg', 5, 'Non', 'moyenne', 'manuelle', 'e', 1000, 1000, 0, 'LO07', 'Nord', 5, 5, 'argileux', 'Chetoui', 1, 1, 1),
-(8, 5, 'generated/bons-pesee/bon-pesee-LO08.pdf', '2026-04-25', '2026-04-25', 1, 'z', 'z', 5, 'Non', 'z', 'manuelle', 'e', 17852, 17852, 17852, 'LO08', 'Nord', 5, 5, 'argileux', 'Chetoui', 1, 1, 1);
+(8, 5, 'generated/bons-pesee/bon-pesee-LO08.pdf', '2026-04-25', '2026-04-25', 1, 'z', 'z', 5, 'Non', 'z', 'manuelle', 'e', 17852, 17852, 17852, 'LO08', 'Nord', 5, 5, 'argileux', 'Chetoui', 1, 1, 1),
+(9, 5, 'generated/bons-pesee/bon-pesee-LO09.pdf', '2026-04-26', '2026-04-26', 1, 'e', 'e', 5, 'Oui', 'mature', 'manuelle', 'lham', 250, 250, 250, 'LO09', 'Nord', 5, 5, 'argileux', 'Chetoui', 1, 1, 1),
+(10, 5, 'generated/bons-pesee/bon-pesee-LO10.pdf', '2026-04-26', '2026-04-26', 1, 'h', 'h', 5, 'Oui', 'bonne', 'manuelle', 'dz', 450, 450, 450, 'LO10', 'Nord', 5, 5, 'argileux', 'Chetoui', 1, 1, 1),
+(11, 5, 'generated/bons-pesee/bon-pesee-LO11.pdf', '2026-04-26', '2026-04-26', 1, 'b', 'h', 5, 'Oui', 'h', 'manuelle', 'e', 550, 550, 550, 'LO11', 'Nord', 5, 5, 'argileux', 'Chetoui', 1, 1, 1),
+(12, 5, 'generated/bons-pesee/bon-pesee-LO12.pdf', '2026-04-26', '2026-04-26', 1, 'b', 'h', 5, 'Oui', 'h', 'manuelle', 'e', 147, 147, 147, 'LO12', 'Nord', 5, 5, 'argileux', 'Arbequina', 1, 1, 1),
+(13, 5, 'generated/bons-pesee/bon-pesee-LO13.pdf', '2026-04-26', '2026-04-26', 1, 'b', 'j', 5, NULL, 'b', 'manuelle', 'e', 7777, 7777, 7777, 'LO13', 'Nord', 5, 5, 'argileux', 'Arbequina', 1, 1, 1),
+(14, 5, NULL, NULL, NULL, NULL, '5555', 'kkk', 5, '0', 'moynne', 'manuelle', 'lkef', 200, 200, 0, NULL, 'e', 5, NULL, 'argilou', 'aaa', 1, 3, 3);
 
 -- --------------------------------------------------------
 
@@ -483,7 +506,7 @@ CREATE TABLE `produit_final` (
 --
 
 INSERT INTO `produit_final` (`id_produit`, `date_production`, `nom_produit`, `qualite`, `quantite_produite`, `reference`, `execution_production_id`) VALUES
-(9, '2026-04-25', 'Huile Chetoui', NULL, 0, 'PF09', 10);
+(9, '2026-04-25', 'Huile Chetoui', NULL, 155, 'PF09', 10);
 
 -- --------------------------------------------------------
 
@@ -530,7 +553,14 @@ INSERT INTO `refresh_tokens` (`id`, `expires_at`, `revoked`, `token`, `utilisate
 (3, '2026-05-01 16:40:14.000000', b'0', '434a80b9-d399-4ef1-a29e-4cf27847e9e9', 1),
 (4, '2026-05-01 16:53:06.000000', b'0', 'b2656a42-07cb-47d8-bc2f-e7272f7cc940', 1),
 (5, '2026-05-01 17:00:08.000000', b'0', '9a8422d1-eebe-4587-a700-376a77e773f6', 1),
-(6, '2026-05-02 13:53:56.000000', b'0', 'ef50cba3-a34b-4f2f-b354-d9b147cd2a4a', 1);
+(6, '2026-05-02 13:53:56.000000', b'0', 'ef50cba3-a34b-4f2f-b354-d9b147cd2a4a', 1),
+(7, '2026-05-03 18:21:15.000000', b'0', 'beabd584-7a32-4a3e-acc8-e30b82e9a69b', 1),
+(8, '2026-05-03 18:46:45.000000', b'0', '266e4196-a04e-4cb5-ad6c-c920e5c4c241', 1),
+(9, '2026-05-03 19:22:14.000000', b'0', 'e1a316c9-737a-4409-b84a-ec52bdcadb91', 4),
+(10, '2026-05-03 19:23:24.000000', b'0', '4ba5b43f-3246-4144-9d43-54f044abc577', 1),
+(11, '2026-05-03 19:25:09.000000', b'0', '5fdd26f6-1f7f-41ad-9e70-313e94808ba6', 1),
+(12, '2026-05-03 19:28:15.000000', b'0', '84b549f0-0935-4969-ab5c-65f355eb25d1', 4),
+(13, '2026-05-04 15:03:29.000000', b'0', '70d79b7d-7f5c-495a-a24b-ea4291d176fe', 1);
 
 -- --------------------------------------------------------
 
@@ -543,15 +573,19 @@ CREATE TABLE `stock` (
   `quantite_disponible` double DEFAULT NULL,
   `reference` varchar(255) DEFAULT NULL,
   `type_stock` varchar(255) DEFAULT NULL,
-  `lot_id` bigint(20) DEFAULT NULL
+  `lot_id` bigint(20) DEFAULT NULL,
+  `variete` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 --
 -- Déchargement des données de la table `stock`
 --
 
-INSERT INTO `stock` (`id_stock`, `quantite_disponible`, `reference`, `type_stock`, `lot_id`) VALUES
-(7, 17852, 'ST07', 'Olive', 8);
+INSERT INTO `stock` (`id_stock`, `quantite_disponible`, `reference`, `type_stock`, `lot_id`, `variete`) VALUES
+(7, 18102, 'ST07', 'Olive', 9, 'chemlalli'),
+(8, 1000, 'ST08', 'Olive', 11, 'chetoui'),
+(9, 7924, 'ST09', 'Olive', 13, 'arbequina'),
+(10, 200, 'ST10', 'olive', 14, 'chemlalli');
 
 -- --------------------------------------------------------
 
@@ -576,7 +610,12 @@ CREATE TABLE `stock_movement` (
 INSERT INTO `stock_movement` (`id_stock_movement`, `commentaire`, `date_mouvement`, `reference`, `type_mouvement`, `lot_id`, `stock_id`) VALUES
 (15, 'Arrivage lot LO07', '2026-04-25', 'MS15', 'ENTREE', 7, 7),
 (16, 'Transfert automatique lors de l\'execution EXE-LO07-G1-M8-20260425154341287', '2026-04-25', 'MS16', 'TRANSFERT', 7, 7),
-(17, 'Arrivage lot LO08', '2026-04-25', 'MS17', 'ENTREE', 8, 7);
+(17, 'Arrivage lot LO08', '2026-04-25', 'MS17', 'ENTREE', 8, 7),
+(18, 'Arrivage lot LO09', '2026-04-26', 'MS18', 'ENTREE', 9, 7),
+(19, 'Arrivage lot LO10', '2026-04-26', 'MS19', 'ENTREE', 10, 8),
+(20, 'Arrivage lot LO11', '2026-04-26', 'MS20', 'ENTREE', 11, 8),
+(21, 'Arrivage lot LO12', '2026-04-26', 'MS21', 'ENTREE', 12, 9),
+(22, 'Arrivage lot LO13', '2026-04-26', 'MS22', 'ENTREE', 13, 9);
 
 -- --------------------------------------------------------
 
@@ -603,7 +642,8 @@ CREATE TABLE `utilisateur` (
 --
 
 INSERT INTO `utilisateur` (`id_utilisateur`, `actif`, `email`, `email_verified`, `mot_de_passe`, `nom`, `prenom`, `telephone`, `verification_token`, `verification_token_expires_at`, `profil_id`) VALUES
-(1, 'ACTIF', 'admin@default.com', b'1', '$2a$10$biqp4m1ugUkiahcpBMsuRO1sByaDs6J6GCsgbQe7gbdqEsExz.jaO', 'Admin', 'Système', NULL, 'a94e2a19-64ef-4408-9eb3-7fbc5c90a2bb', '2026-04-25 16:32:42.000000', 1);
+(1, 'ACTIF', 'admin@default.com', b'1', '$2a$10$biqp4m1ugUkiahcpBMsuRO1sByaDs6J6GCsgbQe7gbdqEsExz.jaO', 'Admin', 'Système', NULL, 'a94e2a19-64ef-4408-9eb3-7fbc5c90a2bb', '2026-04-25 16:32:42.000000', 1),
+(4, 'ACTIF', 'chikhaouiala4@gmail.com', b'1', '$2a$10$XHYu9/aqUwJAcTFZyrNC3ui11pp9aeppddN4e.PLjZotkTWaBYvUW', 'ela', 'chikhaoui', '22939025', '6fa55d8c-185a-4f60-a455-d7a6ba7fcc5d', '2026-04-27 19:22:14.000000', 2);
 
 -- --------------------------------------------------------
 
@@ -936,7 +976,7 @@ ALTER TABLE `huilerie`
 -- AUTO_INCREMENT pour la table `lot_olives`
 --
 ALTER TABLE `lot_olives`
-  MODIFY `id_lot` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
+  MODIFY `id_lot` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=15;
 
 --
 -- AUTO_INCREMENT pour la table `machine`
@@ -996,25 +1036,25 @@ ALTER TABLE `profil`
 -- AUTO_INCREMENT pour la table `refresh_tokens`
 --
 ALTER TABLE `refresh_tokens`
-  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
+  MODIFY `id` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=14;
 
 --
 -- AUTO_INCREMENT pour la table `stock`
 --
 ALTER TABLE `stock`
-  MODIFY `id_stock` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
+  MODIFY `id_stock` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT pour la table `stock_movement`
 --
 ALTER TABLE `stock_movement`
-  MODIFY `id_stock_movement` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=18;
+  MODIFY `id_stock_movement` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=23;
 
 --
 -- AUTO_INCREMENT pour la table `utilisateur`
 --
 ALTER TABLE `utilisateur`
-  MODIFY `id_utilisateur` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `id_utilisateur` bigint(20) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
 -- AUTO_INCREMENT pour la table `valeur_reelle_parametre`
