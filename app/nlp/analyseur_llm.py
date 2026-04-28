@@ -24,28 +24,43 @@ Si une valeur est inconnue, utilise null.
 
 Structure JSON attendue :
 {
-  "intention": "stock|production|machine|rendement|qualite|diagnostic|prediction|reception|campagne|inconnu",
+  "intention": "stock|production|machine|machines_utilisees|rendement|qualite|diagnostic|prediction|reception|campagne|fournisseur|lot_cycle_vie|lot_liste|analyse_labo|mouvement_stock|inconnu",
   "confiance": nombre entre 0.0 et 1.0,
   "huilerie": "nom exact ou null",
   "periode": "aujourd_hui|hier|cette_semaine|semaine_derniere|ce_mois|mois_dernier|annee_2025|annee_2026|null",
   "type_huile": "vierge extra|vierge|lampante|null",
   "variete": "variete d'olive detectee ou null",
-  "code_lot": "code de lot detecte ou null"
+  "code_lot": "reference du lot detecte (ex: LO07, LO08) ou null",
+    "reference_lot": "reference du lot detecte (ex: LO07, LO08) ou null",
+    "lot_reference": "reference du lot detecte (ex: LO07, LO08) ou null",
+    "campagne_annee": "annee detectee pour la campagne (ex: 2025, 2025-2026) ou null"
 }
 
-Huileries connues : Nour, Zitouneya, Sahel.
+Huileries connues : zitouneya, Moulin Sfax, Moulin Sousse, Moulin Artisanal.
 
 Regles de detection d'intention :
-- stock / inventaire / olives / reserve / disponible / quantite  -> "stock"
-- production / huile produite / litres / fabrication             -> "production"
-- machine / panne / maintenance / equipement / broyeur           -> "machine"
-- rendement / performance / taux d'extraction / efficacite       -> "rendement"
-- qualite / analyse / acidite / peroxyde / laboratoire           -> "qualite"
-- pourquoi mauvaise qualite / diagnostic / cause / probleme      -> "diagnostic"
-- prediction / prevision / estimation / prevoir                  -> "prediction"
-- reception / arrivage / pesee / livraison / fournisseur         -> "reception"
-- campagne / saison / annee de campagne                          -> "campagne"
-- Sinon                                                          -> "inconnu"
+- stock / inventaire / olives disponibles / reserve / quantite disponible    -> "stock"
+- production / huile produite / litres produits / fabrication / extraction   -> "production"
+- machine / panne / maintenance / equipement / broyeur / etat machine        -> "machine"
+- quelles machines utilisees / machine la plus utilisee / frequence machine
+  / combien de fois machine / usage machine                                  -> "machines_utilisees"
+- rendement / performance / taux d'extraction / efficacite                   -> "rendement"
+- qualite / analyse / acidite / peroxyde / laboratoire / grade huile         -> "qualite"
+- pourquoi mauvaise qualite / diagnostic / cause / probleme qualite          -> "diagnostic"
+- prediction / prevision / estimation future / prevoir rendement             -> "prediction"
+- reception / arrivage / pesee / livraison / bon de pesee                    -> "reception"
+- campagne / saison / annee de campagne                                      -> "campagne"
+- meilleur fournisseur / classement fournisseur / top fournisseur
+  / qui livre mieux / qualite fournisseur / fournisseur le plus performant   -> "fournisseur"
+- cycle de vie lot / historique lot / parcours lot / trajet lot
+  / suivi lot / etapes du lot / que s'est-il passe pour le lot               -> "lot_cycle_vie"
+- liste des lots / lots non conformes / tracabilite lots / tous les lots
+  / lots recus / lots de la periode                                          -> "lot_liste"
+- analyse laboratoire / resultats labo / k270 / k232 / polyphenols
+  / indice peroxyde / acidite huile                                          -> "analyse_labo"
+- mouvement stock / transfert stock / entree stock / sortie stock
+  / ajustement stock / historique stock                                      -> "mouvement_stock"
+- Sinon                                                                      -> "inconnu"
 
 Regles de detection de periode :
 - aujourd'hui / auj / ce jour              -> "aujourd_hui"
@@ -57,6 +72,14 @@ Regles de detection de periode :
 - 2026 / cette annee                       -> "annee_2026"
 - 2025 / annee derniere                    -> "annee_2025"
 - Aucune periode mentionnee                -> null
+
+Regles de detection de code_lot et reference_lot :
+- Si le message contient LO07, LO08, lot 7, lot7, lot numero 7 -> extraire la reference (format LO + numero)
+- Mettre la meme valeur dans "code_lot" et "reference_lot"
+
+Regles de detection de campagne :
+- Si le message contient une annee explicite apres campagne / saison / campagne olivicole -> l'exposer dans "campagne_annee"
+- Exemples : "campagne 2025", "campagne 2025-2026", "saison 2024"
 """.strip()
 
 
@@ -67,10 +90,20 @@ def _normaliser_resultat(resultat: dict) -> dict:
     except (TypeError, ValueError):
         confiance = 0.5
 
-    if confiance < 0.0:
-        confiance = 0.0
-    if confiance > 1.0:
-        confiance = 1.0
+    confiance = max(0.0, min(1.0, confiance))
+
+    # Normaliser reference_lot : "lot 7" -> "LO07", "lo8" -> "LO08"
+    ref_lot = resultat.get("reference_lot") or resultat.get("code_lot")
+    if ref_lot:
+        import re
+        ref_lot = str(ref_lot).strip().upper()
+        # si c'est juste un numero : "7" -> "LO07"
+        if re.match(r"^\d+$", ref_lot):
+            ref_lot = f"LO{int(ref_lot):02d}"
+        # si c'est "LOT7" ou "LOT07"
+        m = re.match(r"^LOT\s*(\d+)$", ref_lot)
+        if m:
+            ref_lot = f"LO{int(m.group(1)):02d}"
 
     return {
         "intention": intention,
@@ -79,7 +112,10 @@ def _normaliser_resultat(resultat: dict) -> dict:
         "periode": resultat.get("periode"),
         "type_huile": resultat.get("type_huile"),
         "variete": resultat.get("variete"),
-        "code_lot": resultat.get("code_lot"),
+        "code_lot": ref_lot,
+        "reference_lot": ref_lot,
+        "lot_reference": resultat.get("lot_reference") or ref_lot,
+        "campagne_annee": resultat.get("campagne_annee"),
     }
 
 
@@ -122,12 +158,26 @@ async def analyser_message(message: str) -> dict:
 
 
 def _repli_regles(message: str) -> dict:
-    """Repli minimal sur des regles simples si Grok est indisponible."""
+    """Repli sur des regles simples si Groq est indisponible."""
+    import re
     texte = message.lower().strip()
     intention = "inconnu"
-    if any(m in texte for m in ["stock", "inventaire", "olive", "reserve", "quantite"]):
+
+    if any(m in texte for m in ["meilleur fournisseur", "classement fournisseur", "top fournisseur", "fournisseur"]):
+        intention = "fournisseur"
+    elif any(m in texte for m in ["cycle de vie", "historique lot", "parcours lot", "suivi lot", "etapes lot"]):
+        intention = "lot_cycle_vie"
+    elif any(m in texte for m in ["machines utilisees", "machine la plus utilisee", "usage machine", "frequence machine"]):
+        intention = "machines_utilisees"
+    elif any(m in texte for m in ["liste lot", "lots non conformes", "tracabilite", "tous les lots"]):
+        intention = "lot_liste"
+    elif any(m in texte for m in ["analyse labo", "resultat labo", "k270", "k232", "polyphenol", "indice peroxyde"]):
+        intention = "analyse_labo"
+    elif any(m in texte for m in ["mouvement stock", "transfert stock", "entree stock", "sortie stock"]):
+        intention = "mouvement_stock"
+    elif any(m in texte for m in ["stock", "inventaire", "olive", "reserve", "quantite disponible"]):
         intention = "stock"
-    elif any(m in texte for m in ["production", "huile", "litre", "produit"]):
+    elif any(m in texte for m in ["production", "huile", "litre", "produit", "fabrique"]):
         intention = "production"
     elif any(m in texte for m in ["machine", "panne", "maintenance"]):
         intention = "machine"
@@ -135,6 +185,30 @@ def _repli_regles(message: str) -> dict:
         intention = "rendement"
     elif any(m in texte for m in ["qualite", "acidite", "peroxyde"]):
         intention = "qualite"
+    elif any(m in texte for m in ["pourquoi", "diagnostic", "cause"]):
+        intention = "diagnostic"
+    elif any(m in texte for m in ["prediction", "prevision", "estimation"]):
+        intention = "prediction"
+    elif any(m in texte for m in ["reception", "arrivage", "pesee"]):
+        intention = "reception"
+    elif any(m in texte for m in ["campagne", "saison"]):
+        intention = "campagne"
+
+    # Extraction reference lot
+    ref_lot = None
+    campagne_annee = None
+    m = re.search(r"\blo\s*(\d+)\b", texte)
+    if m:
+        ref_lot = f"LO{int(m.group(1)):02d}"
+    else:
+        m = re.search(r"\blot\s*(\d+)\b", texte)
+        if m:
+            ref_lot = f"LO{int(m.group(1)):02d}"
+
+    if any(mot in texte for mot in ["campagne", "saison", "annee de campagne", "campagne olivicole"]):
+        m = re.search(r"\b(20\d{2}(?:\s*-\s*20\d{2})?)\b", texte)
+        if m:
+            campagne_annee = re.sub(r"\s*[-/]\s*", "-", m.group(1)).strip()
 
     return {
         "intention": intention,
@@ -143,7 +217,10 @@ def _repli_regles(message: str) -> dict:
         "periode": None,
         "type_huile": None,
         "variete": None,
-        "code_lot": None,
+        "code_lot": ref_lot,
+        "reference_lot": ref_lot,
+        "lot_reference": ref_lot,
+        "campagne_annee": campagne_annee,
     }
 
 

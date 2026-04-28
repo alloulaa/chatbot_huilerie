@@ -1,5 +1,6 @@
 import logging
 import os
+import unicodedata
 from typing import Any
 
 try:
@@ -15,10 +16,16 @@ INTENT_MODULE_MAP = {
     "stock": "STOCK",
     "production": "GUIDE_PRODUCTION",
     "machine": "MACHINES",
+    "machines_utilisees": "MACHINES",
     "rendement": "GUIDE_PRODUCTION",
     "prediction": "GUIDE_PRODUCTION",
-    "qualite": "LOTS_TRACABILITE",
-    "diagnostic": "LOTS_TRACABILITE",
+    "qualite": "LOTS_TRAÇABILITE",
+    "diagnostic": "LOTS_TRAÇABILITE",
+    "fournisseur": "LOTS_TRAÇABILITE",
+    "lot_cycle_vie": "LOTS_TRAÇABILITE",
+    "lot_liste": "LOTS_TRAÇABILITE",
+    "analyse_labo": "LOTS_TRAÇABILITE",
+    "mouvement_stock": "STOCK_MOUVEMENT",
     "reception": "RECEPTION",
     "campagne": "CAMPAGNE_OLIVES",
 }
@@ -86,10 +93,15 @@ def is_intent_allowed(intent: str, permissions: list[dict[str, Any]] | None) -> 
     if module is None:
         return True
 
+    def _normalize(value: str) -> str:
+        decomposed = unicodedata.normalize("NFD", value)
+        without_marks = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+        return without_marks.lower()
+
     for perm in permissions or []:
         perm_module = str(perm.get("module") or "")
-        if perm_module.lower() == module.lower():
-            return bool(perm.get("canRead"))
+        if _normalize(perm_module) == _normalize(module):
+            return bool(perm.get("canRead") if perm.get("canRead") is not None else perm.get("can_read"))
 
     return False
 

@@ -5,31 +5,56 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Chatbot Huilerie - Prototype enrichi</title>
   <style>
-    body { font-family: Arial, sans-serif; background:#f4f7fb; margin:0; }
-    .wrap { max-width: 1100px; margin: 24px auto; display:grid; grid-template-columns: 300px 1fr; gap:20px; }
-    .card { background:#fff; border-radius:16px; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,.08); }
-    h1 { margin:0 0 8px; font-size:26px; }
-    .muted { color:#666; font-size:14px; }
-    #messages { height: 540px; overflow:auto; padding:12px; background:#f8fafc; border-radius:12px; border:1px solid #e5e7eb; }
-    .msg { margin:10px 0; padding:12px 14px; border-radius:14px; max-width:80%; white-space:pre-wrap; }
-    .user { background:#dbeafe; margin-left:auto; }
-    .bot { background:#ecfeef; }
-    .meta { font-size:12px; color:#666; margin-top:5px; }
-    .row { display:flex; gap:8px; margin-top:12px; }
-    input, select, button { border-radius:10px; border:1px solid #cbd5e1; padding:10px 12px; font-size:14px; }
-    input { flex:1; }
-    button { background:#111827; color:#fff; cursor:pointer; }
-    .quick button { width:100%; text-align:left; margin-bottom:8px; background:#fff; color:#111827; }
+    :root {
+      --bg: #f4f7fb;
+      --card: rgba(255,255,255,.92);
+      --ink: #102033;
+      --muted: #637081;
+      --accent: #1f5b39;
+      --accent-soft: #e8f2ea;
+      --line: #d9e1ea;
+      --user: #dbeafe;
+      --bot: #eef8f0;
+    }
+    body {
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(31,91,57,.10), transparent 35%),
+        radial-gradient(circle at bottom right, rgba(31,91,57,.08), transparent 30%),
+        var(--bg);
+      margin:0;
+      color: var(--ink);
+    }
+    .wrap { max-width: 1180px; margin: 22px auto; display:grid; grid-template-columns: 320px 1fr; gap:20px; padding: 0 16px; }
+    .card { background:var(--card); backdrop-filter: blur(8px); border-radius:20px; padding:20px; box-shadow:0 18px 40px rgba(12,25,38,.08); border:1px solid rgba(255,255,255,.5); }
+    h1 { margin:0 0 8px; font-size:28px; letter-spacing:-.03em; }
+    .muted { color:var(--muted); font-size:14px; line-height:1.5; }
+    #messages { height: 540px; overflow:auto; padding:14px; background:linear-gradient(180deg, rgba(248,250,252,.95), rgba(242,246,250,.88)); border-radius:16px; border:1px solid var(--line); }
+    .msg { margin:10px 0; padding:12px 14px; border-radius:16px; max-width:80%; white-space:pre-wrap; box-shadow:0 8px 20px rgba(18,38,63,.06); }
+    .user { background:var(--user); margin-left:auto; }
+    .bot { background:var(--bot); }
+    .meta { font-size:12px; color:var(--muted); margin-top:6px; }
+    .row { display:flex; gap:10px; margin-top:12px; }
+    input, select, button { border-radius:12px; border:1px solid var(--line); padding:11px 12px; font-size:14px; }
+    input { flex:1; background:#fff; }
+    button { background:var(--accent); color:#fff; cursor:pointer; border-color:transparent; }
+    .quick button { width:100%; text-align:left; margin-bottom:8px; background:#fff; color:var(--ink); }
     .small { font-size:13px; }
-    .badge { display:inline-block; padding:4px 8px; border-radius:999px; background:#eef2ff; font-size:12px; margin:3px 3px 0 0; }
-    pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:12px; overflow:auto; }
+    .badge { display:inline-block; padding:4px 8px; border-radius:999px; background:var(--accent-soft); font-size:12px; margin:3px 3px 0 0; color:var(--accent); }
+    .choice-bar { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .choice-bar button { background:#fff; color:var(--accent); border:1px solid #bfd7c8; }
+    .panel { margin-top:16px; padding:16px; border:1px solid var(--line); border-radius:16px; background:#fff; }
+    .panel h3 { margin:0 0 8px; font-size:16px; }
+    .panel .hint { color:var(--muted); font-size:13px; }
+    .chart-wrap { position:relative; height:320px; }
+    canvas { max-width:100%; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <h1>Chatbot Huilerie</h1>
-      <div class="muted">Prototype enrichi : intentions métier, contexte conversationnel, rôle utilisateur, alertes et prédictions.</div>
+      <div class="muted">Assistant métier pour l'huilerie : réponses claires, choix texte ou graphique, et visualisations à la demande.</div>
       <div style="margin-top:12px;">
         <label class="small">Utilisateur de test</label>
         <select id="userId">
@@ -41,14 +66,12 @@
       </div>
       <div style="margin-top:16px;" class="quick">
         <div class="small muted">Exemples rapides</div>
-        <button onclick="fillQ('Quelle est la production de l\'huilerie Nour ce mois-ci ?')">Production Nour ce mois-ci</button>
-        <button onclick="fillQ('Quel est le stock actuel d\'huile vierge extra ?')">Stock vierge extra</button>
-        <button onclick="fillQ('Quelle machine a eu le plus de pannes ce mois-ci ?')">Machine la plus en panne</button>
-        <button onclick="fillQ('Donne-moi les KPI globaux de cette semaine')">KPI globaux</button>
-        <button onclick="fillQ('Donne-moi les lots non conformes ce mois-ci')">Lots non conformes</button>
-        <button onclick="fillQ('Quelles sont les alertes actives ?')">Alertes actives</button>
-        <button onclick="fillQ('Prédire la qualité du lot L202')">Prédiction qualité lot</button>
-        <button onclick="fillQ('Explique la prédiction du lot L202')">Explication prédiction</button>
+        <button onclick="fillQ('Quels sont les meilleurs fournisseurs pour cette semaine ?')">Fournisseurs</button>
+        <button onclick="fillQ('Donne-moi le cycle de vie du lot LO07')">Cycle de lot</button>
+        <button onclick="fillQ('Montre le stock actuel par variété')">Stock par variété</button>
+        <button onclick="fillQ('Quelles campagnes sont disponibles ?')">Campagnes</button>
+        <button onclick="fillQ('Montre les analyses laboratoire du lot LO07')">Analyses labo</button>
+        <button onclick="fillQ('Affiche les mouvements de stock de cette semaine')">Mouvements stock</button>
       </div>
     </div>
 
@@ -65,10 +88,14 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <script>
     const sessionId = 'web-demo-session';
     const messagesEl = document.getElementById('messages');
     const detailsEl = document.getElementById('details');
+    let choicePayload = null;
+    let chartInstance = null;
 
     function addMessage(text, sender, meta='') {
       const div = document.createElement('div');
@@ -76,15 +103,91 @@
       div.innerHTML = `<div>${text}</div>${meta ? `<div class="meta">${meta}</div>` : ''}`;
       messagesEl.appendChild(div);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    function addChoiceMessage(text, meta='') {
+      const div = addMessage(text, 'bot', meta);
+      const actions = document.createElement('div');
+      actions.className = 'choice-bar';
+      actions.innerHTML = `
+        <button type="button" onclick="sendChoice('texte')">Texte</button>
+        <button type="button" onclick="sendChoice('graphique')">Graphique</button>
+      `;
+      div.appendChild(actions);
+      return div;
     }
 
     function fillQ(q) {
       document.getElementById('messageInput').value = q;
     }
 
-    async function sendMessage() {
+    function clearDetails() {
+      detailsEl.innerHTML = '';
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
+    }
+
+    function renderChart(chartType, rows) {
+      clearDetails();
+      const card = document.createElement('div');
+      card.className = 'panel';
+      card.innerHTML = `
+        <h3>Visualisation</h3>
+        <div class="hint">${chartType === 'pie' ? 'Répartition' : chartType === 'line' ? 'Évolution' : 'Comparaison'}</div>
+        <div class="chart-wrap"><canvas id="chartCanvas"></canvas></div>
+      `;
+      detailsEl.appendChild(card);
+
+      const ctx = document.getElementById('chartCanvas');
+      const labels = (rows || []).map(item => item.label);
+      const values = (rows || []).map(item => Number(item.value) || 0);
+      chartInstance = new Chart(ctx, {
+        type: chartType || 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Résultats',
+            data: values,
+            backgroundColor: ['#1f5b39', '#4f7c62', '#7fa68d', '#aec6b4', '#cfe0d6'],
+            borderColor: '#1f5b39',
+            borderWidth: 1,
+            tension: 0.35,
+            fill: chartType === 'line'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: chartType !== 'pie' } },
+          scales: chartType === 'pie' ? {} : { y: { beginAtZero: true } }
+        }
+      });
+    }
+
+    function renderChoice(data) {
+      choicePayload = data;
+      clearDetails();
+      const card = document.createElement('div');
+      card.className = 'panel';
+      card.innerHTML = `
+        <h3>Affichage disponible</h3>
+        <div class="hint">Choisissez comment afficher ces résultats.</div>
+      `;
+      detailsEl.appendChild(card);
+    }
+
+    async function sendChoice(choice) {
+      if (!choicePayload) return;
+      document.getElementById('messageInput').value = choice;
+      await sendMessage(choice);
+    }
+
+    async function sendMessage(forceMessage = null) {
       const input = document.getElementById('messageInput');
-      const message = input.value.trim();
+      const message = (forceMessage || input.value).trim();
       if (!message) return;
       const userId = Number(document.getElementById('userId').value);
       addMessage(message, 'user');
@@ -96,8 +199,23 @@
         body: JSON.stringify({ message, user_id: userId, session_id: sessionId })
       });
       const data = await res.json();
-      addMessage(data.response, 'bot', `Intent: ${data.intent} | Confiance: ${data.confidence} | Portée: ${JSON.stringify(data.applied_scope)}`);
-      detailsEl.innerHTML = `<div class="small muted">Dernier résultat structuré</div><pre>${JSON.stringify(data.data, null, 2)}</pre>`;
+      const responseType = data.type || 'text';
+      const text = data.message || data.response || 'Réponse indisponible.';
+      if (responseType === 'choice') {
+        addChoiceMessage(text, `Intent: ${data.intent} | Confiance: ${data.confidence}`);
+      } else {
+        addMessage(text, 'bot', `Intent: ${data.intent} | Confiance: ${data.confidence}`);
+      }
+
+      if (responseType === 'choice') {
+        renderChoice(data.data || []);
+      } else if (responseType === 'chart') {
+        renderChart(data.chart_type || 'bar', data.data || []);
+      } else {
+        clearDetails();
+      }
+
+      choicePayload = responseType === 'choice' ? (data.data || []) : null;
     }
 
     addMessage("Bonjour. Je suis prêt à répondre sur la production, le stock, la qualité, les machines, les alertes et les prédictions simples.", 'bot');
