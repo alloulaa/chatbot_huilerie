@@ -164,12 +164,13 @@ class ChatbotService:
         end_date: str | None = None,
         enterprise_id: int | None = None,
     ) -> dict[str, Any]:
+        # Query for machines that need attention (maintenance, surveillance, panne, etc.)
+        # Status filter is applied without date constraints to catch all problematic machines
         query = """
-            SELECT DISTINCT m.nom_machine, m.etat_machine
+            SELECT DISTINCT m.nom_machine, m.etat_machine, m.reference, m.capacite
             FROM machine m
             JOIN huilerie h ON h.id_huilerie = m.huilerie_id
-            LEFT JOIN execution_production ep ON ep.machine_id = m.id_machine
-            WHERE LOWER(COALESCE(m.etat_machine, '')) IN ('maintenance', 'surveillance', 'en panne', 'panne')
+            WHERE LOWER(COALESCE(m.etat_machine, 'en service')) IN ('maintenance', 'surveillance', 'en panne', 'panne')
         """
         params: list[Any] = []
         if enterprise_id is not None:
@@ -178,9 +179,6 @@ class ChatbotService:
         if huilerie:
             query += " AND LOWER(h.nom) = LOWER(%s)"
             params.append(huilerie)
-        if start_date and end_date:
-            query += " AND ep.date_debut BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
         query += " ORDER BY m.nom_machine"
 
         connection = None
@@ -193,9 +191,22 @@ class ChatbotService:
 
             normalized = []
             for row in rows:
-                machine_name = row.get("nom_machine") or row.get("machine") or "Machine inconnue"
-                machine_state = row.get("etat_machine") or row.get("probleme") or row.get("etat") or "INCONNU"
-                normalized.append({"nom_machine": machine_name, "etat_machine": machine_state})
+                # support both snake_case and camelCase DB column names
+                machine_name = (
+                    row.get("nom_machine")
+                    or row.get("nomMachine")
+                    or row.get("machine")
+                    or "Machine inconnue"
+                )
+                machine_state = (
+                    row.get("etat_machine")
+                    or row.get("etatMachine")
+                    or row.get("probleme")
+                    or row.get("etat")
+                    or "INCONNU"
+                )
+                # normalize to camelCase keys to match Java entity: nomMachine, etatMachine
+                normalized.append({"nomMachine": machine_name, "etatMachine": machine_state})
 
             return {"value": normalized}
         except Exception as exc:
@@ -249,13 +260,19 @@ class ChatbotService:
 
             normalized = []
             for row in rows:
+                # accept multiple possible column namings and output camelCase
+                nom = row.get("nom_machine") or row.get("nomMachine") or row.get("nom") or "Machine inconnue"
+                machine_ref = row.get("machine_ref") or row.get("machineRef") or row.get("reference") or "N/D"
+                nb_exec = int(row.get("nb_executions") or row.get("nbExecutions") or 0)
+                rend_moy = self._to_float(row.get("rendement_moyen") or row.get("rendementMoyen"), 0.0)
+                total_prod = self._to_float(row.get("total_produit") or row.get("totalProduit"), 0.0)
                 normalized.append(
                     {
-                        "nom_machine": row.get("nom_machine") or "Machine inconnue",
-                        "machine_ref": row.get("machine_ref") or "N/D",
-                        "nb_executions": int(row.get("nb_executions") or 0),
-                        "rendement_moyen": self._to_float(row.get("rendement_moyen"), 0.0),
-                        "total_produit": self._to_float(row.get("total_produit"), 0.0),
+                        "nomMachine": nom,
+                        "machineRef": machine_ref,
+                        "nbExecutions": nb_exec,
+                        "rendementMoyen": rend_moy,
+                        "totalProduit": total_prod,
                     }
                 )
 

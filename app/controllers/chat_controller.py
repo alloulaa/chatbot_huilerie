@@ -124,7 +124,7 @@ def _chart_data_for(intent: str, data: Any) -> Any:
         label_keys = {
             "stock": ["variete", "label"],
             "fournisseur": ["fournisseur_nom", "label"],
-            "machines_utilisees": ["nom_machine", "machine_ref", "label"],
+            "machines_utilisees": ["nomMachine", "machineRef", "nom_machine", "machine_ref", "label"],
             "lot_liste": ["reference", "lot_ref", "label"],
             "campagne": ["reference", "annee", "label"],
             "analyse_labo": ["lot_ref", "reference", "label"],
@@ -133,7 +133,7 @@ def _chart_data_for(intent: str, data: Any) -> Any:
         value_keys = {
             "stock": ["total_stock", "value"],
             "fournisseur": ["quantite_totale_kg", "nb_lots", "value"],
-            "machines_utilisees": ["nb_executions", "total_produit", "value"],
+            "machines_utilisees": ["nbExecutions", "nb_executions", "totalProduit", "total_produit", "value"],
             "lot_liste": ["quantite_initiale", "value"],
             "campagne": ["total_olives_kg", "nb_lots", "value"],
             "analyse_labo": ["acidite_huile_pourcent", "indice_peroxyde_meq_o2_kg", "k270", "value"],
@@ -162,6 +162,15 @@ def _chart_data_for(intent: str, data: Any) -> Any:
             "rendement_moyen", "acidite_huile_pourcent", "indice_peroxyde_meq_o2_kg", "k270",
             "value", "total", "count", "nb_lots"
         ]))
+        # also accept camelCase variants produced by updated services
+        camel_variants = [
+            "quantiteTotaleKg", "quantiteInitiale", "totalProduit", "totalStock",
+            "rendementMoyen", "aciditeMoyenne", "indicePeroxydeMeqO2Kg", "k270",
+            "value", "total", "count", "nbLots", "nbExecutions"
+        ]
+        for cv in camel_variants:
+            if cv not in preferred_order:
+                preferred_order.append(cv)
 
         metrics: list[str] = []
         for key in preferred_order:
@@ -196,18 +205,13 @@ def _chart_data_for(intent: str, data: Any) -> Any:
             return points
 
         # multiple metrics -> return Chart.js friendly multi-dataset structure
-        # Special handling for fournisseur: produce a dual-axis chart
+        # Special handling for fournisseur: show ONLY quantite_totale_kg as bars (no dual-axis)
         if intent == "fournisseur":
-            # prefer quantite_totale_kg as bar (left axis) and rendement_moyen as line (right axis)
+            # Extract quantity metric for bars
             qty_key = None
-            rend_key = None
-            for k in ("quantite_totale_kg", "quantite", "value"):
+            for k in ("quantite_totale_kg", "quantiteTotaleKg", "quantite", "value"):
                 if k in metrics:
                     qty_key = k
-                    break
-            for k in ("rendement_moyen", "rendement", "rendement_predit"):
-                if k in metrics:
-                    rend_key = k
                     break
 
             datasets = []
@@ -217,18 +221,8 @@ def _chart_data_for(intent: str, data: Any) -> Any:
                     "label": "Quantité livrée (kg)",
                     "data": series,
                     "type": "bar",
-                    "yAxisID": "y",
                 })
-            if rend_key:
-                series = [ _safe_float(row.get(rend_key), 0.0) for row in data ]
-                datasets.append({
-                    "label": "Rendement (%)",
-                    "data": series,
-                    "type": "line",
-                    "yAxisID": "y1",
-                    "fill": False,
-                })
-
+            
             return {"labels": labels, "datasets": datasets}
 
         datasets: list[dict[str, Any]] = []
@@ -338,14 +332,14 @@ def _build_response(
         question = "Souhaitez-vous voir les résultats sous forme de texte ou de graphique ?"
         return ChatResponse(
             type="choice",
-            message=question,
+            message=response_text + "\n\n" + question,
             intent=intent,
             confidence=confidence,
             entities=entities,
-            response=question,
+            response=response_text + "\n\n" + question,
             options=["texte", "graphique"],
             chart_type=chart_type,
-            data=chart_data,
+            data=response_data,
             applied_scope=applied_scope,
             applied_permissions=applied_permissions,
             pending_choice=True,
@@ -410,7 +404,7 @@ def ask_chatbot(
                 entities={},
                 response="Token invalide ou expiré.",
                 data=None,
-                applied_scope=None,
+                applied_scope={},
                 applied_permissions=None,
             )
         user_is_admin = is_admin(auth_data)
@@ -450,7 +444,7 @@ def ask_chatbot(
                 entities=entities,
                 response="Accès refusé pour cet intent.",
                 data=None,
-                applied_scope=None,
+                applied_scope={},
                 applied_permissions=applied_perms,
             )
 
@@ -522,7 +516,11 @@ def ask_chatbot(
         if not rows:
             response_text = f"Toutes les machines sont opérationnelles {scope_text}.{ctx_note}"
         else:
-            lines = [f"- **{r['nom_machine']}** : {r['etat_machine']}" for r in rows]
+            lines = [
+                f"- **{r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')}** : "
+                f"{r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'INCONNU')}"
+                for r in rows
+            ]
             response_text = f"Machines nécessitant attention {scope_text} :\n" + "\n".join(lines) + ctx_note
         response_data = rows
 
@@ -535,11 +533,16 @@ def ask_chatbot(
         else:
             lines = []
             for r in rows[:5]:
+                nom = r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')
+                ref = r.get('machineRef') or r.get('machine_ref') or r.get('reference') or 'N/D'
+                nb = r.get('nbExecutions') or r.get('nb_executions') or 0
+                rend = r.get('rendementMoyen') or r.get('rendement_moyen') or 0.0
+                total = r.get('totalProduit') or r.get('total_produit') or 0.0
                 lines.append(
-                    f"- **{r['nom_machine']}** ({r['machine_ref']}) — "
-                    f"{r['nb_executions']} exécution(s), "
-                    f"rendement moyen {_fmt(r['rendement_moyen'], 1)} %, "
-                    f"{_fmt(r['total_produit'])} L produits"
+                    f"- **{nom}** ({ref}) — "
+                    f"{nb} exécution(s), "
+                    f"rendement moyen {_fmt(rend, 1)} %, "
+                    f"{_fmt(total)} L produits"
                 )
             response_text = f"Machines les plus utilisées {scope_text} :\n" + "\n".join(lines) + ctx_note
         response_data = rows
