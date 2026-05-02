@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header
 
 from app.database import get_db_connection
 from app.models import ChatRequest, ChatResponse
-from app.nlp.analyseur_llm import analyser_message_sync
+from app.services.chat_service_v2 import ChatService as NewChatService
 from app.nlp.normalizer import resolve_period
 from app.services.chatbot_service import ChatbotService
 from app.services.permission_service import (
@@ -19,6 +19,7 @@ from app.services.permission_service import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatbotService()
+new_chat_service = NewChatService()
 
 SESSION_CONTEXT: dict[str, dict] = {}
 
@@ -846,26 +847,25 @@ def ask_chatbot(
         user_enterprise_id = get_user_enterprise_id(auth_data)
         applied_perms = auth_data.get("permissions", [])
 
-    # ── NLP ──────────────────────────────────────────────────────────────────
-    resultat = analyser_message_sync(payload.message)
-    intent = str(resultat.get("intention") or "inconnu").strip().lower()
+    # ── NLP (via nouveau ChatService)─────────────────────────────────────────
+    import asyncio
+    nlp_out = asyncio.run(new_chat_service.process_message(
+        message=payload.message,
+        session_id=payload.session_id,
+        huilerie=None,
+        enterprise_id=user_enterprise_id,
+        permissions=applied_perms or [],
+        user_is_admin=user_is_admin,
+    ))
+
+    intent = str(nlp_out.get("intent") or "inconnu").strip().lower()
     try:
-        confidence = float(resultat.get("confiance", 0.5))
+        confidence = float(nlp_out.get("confidence", 0.5))
     except (TypeError, ValueError):
         confidence = 0.5
     confidence = max(0.0, min(1.0, confidence))
 
-    entities = {
-        "huilerie": resultat.get("huilerie"),
-        "periode": resultat.get("periode"),
-        "period_label": resultat.get("periode"),
-        "type_huile": resultat.get("type_huile"),
-        "variete": resultat.get("variete"),
-        "code_lot": resultat.get("code_lot"),
-        "reference_lot": resultat.get("reference_lot") or resultat.get("code_lot"),
-        "lot_reference": resultat.get("lot_reference") or resultat.get("reference_lot") or resultat.get("code_lot"),
-        "campagne_annee": resultat.get("campagne_annee"),
-    }
+    entities = nlp_out.get("entities") or {}
 
     # ── Intent Override : priorité aux mots-clés explicites du message ──
     _msg_lower = payload.message.lower().strip()
@@ -953,317 +953,14 @@ def ask_chatbot(
         "end_date": end_date,
     }
 
-    # ── Dispatch ─────────────────────────────────────────────────────────────
+    # ── Dispatch centralisé via ChatService (résultat déjà calculé)
+    response_text = nlp_out.get("text") or ""
+    response_data = nlp_out.get("data")
+    # Si le handler a renvoyé un payload structuré, préférer structured_payload
+    if nlp_out.get("structured_payload"):
+        response_data = nlp_out.get("data") or nlp_out.get("structured_payload")
 
-    response_text = ""
-    response_data = None
-
-    # --- STOCK ---------------------------------------------------------------
-    if intent == "stock":
-        result = service.get_stock(huilerie, None, None, user_enterprise_id)
-        rows = result.get("value") or []
-
-        if not rows:
-            scope_part = f" pour l'huilerie **{huilerie}**" if huilerie else ""
-            response_text = f"Aucune donnée de stock disponible{scope_part}.{ctx_note}"
-            response_data = []
-        else:
-            # Texte résumé
-            lines = []
-            for r in rows:
-                ref  = r.get("reference_stock") or "N/D"
-                var  = r.get("variete") or "Inconnue"
-                qte  = r.get("quantite_disponible") or r.get("total_stock") or 0
-                lot  = r.get("lot_reference") or ""
-                lot_part = f" | lot : **{lot}**" if lot else ""
-                lines.append(f"- **{ref}** | {var} | **{_fmt(qte)} kg**{lot_part}")
-
-            scope_part = f" de l'huilerie **{huilerie}**" if huilerie else ""
-            response_text = f"Stock{scope_part} :\n" + "\n".join(lines) + ctx_note
-
-            # Données structurées pour le widget Angular
-            response_data = rows
-
-    # --- PRODUCTION ----------------------------------------------------------
-    elif intent == "production":
-        query_start_date = start_date if explicit_period else None
-        query_end_date = end_date if explicit_period else None
-        result = service.get_production(huilerie, query_start_date, query_end_date, user_enterprise_id)
-        total = result.get("value", 0)
-        if total <= 0:
-            response_text = f"Aucune production enregistrée pour {period_text}.{ctx_note}"
-        else:
-            response_text = f"Production {scope_text} : **{_fmt(total)} litres** d'huile.{ctx_note}"
-        response_data = {"total_production_litres": total}
-
-    # --- MACHINE — état ------------------------------------------------------
-    elif intent == "machine":
-        result = service.get_machines(huilerie, start_date, end_date, user_enterprise_id)
-        rows = result.get("value") or []
-        if not rows:
-            response_text = f"Toutes les machines sont opérationnelles {scope_text}.{ctx_note}"
-        else:
-            lines = [
-                f"- **{r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')}** : "
-                f"{r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'INCONNU')}"
-                for r in rows
-            ]
-            response_text = f"Machines nécessitant attention {scope_text} :\n" + "\n".join(lines) + ctx_note
-        response_data = rows
-
-    # --- MACHINES LES PLUS UTILISÉES -----------------------------------------
-    elif intent == "machines_utilisees":
-        # Only apply date filter if user explicitly mentioned a period
-        query_start_date = start_date if explicit_period else None
-        query_end_date = end_date if explicit_period else None
-        result = service.get_machines_utilisees(huilerie, query_start_date, query_end_date, user_enterprise_id)
-        rows = result.get("value") or []
-        if not rows:
-            response_text = f"Aucune donnée d'utilisation machines {scope_text}.{ctx_note}"
-        else:
-            lines = []
-            for r in rows[:5]:
-                nom = r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')
-                nb = r.get('nbExecutions') or r.get('nb_executions') or 0
-                rend = r.get('rendementMoyen') or r.get('rendement_moyen') or 0.0
-                total = r.get('totalProduit') or r.get('total_produit') or 0.0
-                lines.append(
-                    f"- **{nom}** — {nb} exécution(s), "
-                    f"rendement {_fmt(rend, 1)} %, {_fmt(total)} L produits"
-                )
-            extra = f" *(+{len(rows) - 5} autres)*" if len(rows) > 5 else ""
-            response_text = f"Machines les plus utilisées {scope_text} :\n" + "\n".join(lines) + extra + ctx_note
-        response_data = rows
-
-    # --- RENDEMENT -----------------------------------------------------------
-    elif intent == "rendement":
-        query_start_date = start_date if explicit_period else None
-        query_end_date = end_date if explicit_period else None
-        result = service.get_rendement(huilerie, query_start_date, query_end_date, user_enterprise_id)
-        rend = result.get("value", 0)
-        if rend <= 0:
-            response_text = f"Aucune donnée de rendement pour {period_text}.{ctx_note}"
-        else:
-            response_text = f"Rendement moyen réel {scope_text} : **{_fmt(rend, 1)} %**.{ctx_note}"
-        response_data = {"rendement_moyen": rend}
-
-    # --- PREDICTION ----------------------------------------------------------
-    elif intent == "prediction":
-        result = service.get_prediction(huilerie, start_date, end_date, user_enterprise_id)
-        rend = result.get("rendement_predit", 0)
-        qte  = result.get("quantite_estimee", 0)
-        if rend <= 0 and qte <= 0:
-            response_text = f"Aucune prédiction disponible pour {period_text}.{ctx_note}"
-        else:
-            response_text = (
-                f"Prédiction {scope_text} : rendement prédit **{_fmt(rend, 1)} %**, "
-                f"production estimée **{_fmt(qte)} litres**.{ctx_note}"
-            )
-        response_data = result
-
-    # --- QUALITE -------------------------------------------------------------
-    elif intent == "qualite":
-        query_start_date = start_date if explicit_period else None
-        query_end_date = end_date if explicit_period else None
-        result = service.get_qualite(huilerie, query_start_date, query_end_date, user_enterprise_id)
-        rows = result.get("value") or []
-        summary = result.get("summary", {})
-        if not rows:
-            response_text = f"Aucune donnée de qualité pour {period_text}.{ctx_note}"
-        else:
-            parts = []
-            for k in ("Bonne", "Moyenne", "Mauvaise", "Inconnue"):
-                if summary.get(k, 0) > 0:
-                    parts.append(f"{k}: {summary[k]}")
-            response_text = f"Qualité des produits {scope_text} — " + ", ".join(parts) + ctx_note
-        response_data = {"details": rows, "summary": summary}
-
-    # --- DIAGNOSTIC ----------------------------------------------------------
-    elif intent == "diagnostic":
-        result = service.diagnostic_qualite(huilerie, start_date, end_date, user_enterprise_id)
-        issues = result.get("issues") or []
-        rows   = result.get("rows") or []
-        if not rows:
-            response_text = f"Aucune analyse labo disponible pour {period_text}.{ctx_note}"
-        elif issues:
-            response_text = (
-                f"Qualité insuffisante {scope_text} — causes identifiées : "
-                + ", ".join(f"**{i}**" for i in issues) + ".{ctx_note}"
-            )
-        else:
-            response_text = f"Tous les paramètres sont conformes {scope_text}.{ctx_note}"
-        response_data = result
-
-    # --- MEILLEUR FOURNISSEUR ------------------------------------------------
-    elif intent == "fournisseur":
-        query_start_date = start_date if explicit_period else None
-        query_end_date = end_date if explicit_period else None
-        result = service.get_meilleur_fournisseur(huilerie, query_start_date, query_end_date, user_enterprise_id)
-        rows = result.get("value") or []
-        if not rows:
-            response_text = f"Aucune donnée fournisseur disponible pour {period_text}.{ctx_note}"
-        else:
-            annotated = _annotate_fournisseurs(rows)
-            lines = []
-            for r in annotated[:8]:
-                acid_flag = " ⚠️" if r.get("acidite_status") == "out of range" else ""
-                rend_flag = " ⚠️" if r.get("rendement_status") == "out of range" else ""
-                lines.append(
-                    f"{r.get('rang', '?')}. **{r.get('fournisseur_nom')}** — {r.get('lots', 0)} lot(s), "
-                    f"{_fmt(r.get('kg'))} kg, rendement {_fmt(r.get('rendement'), 1)} %{rend_flag}, "
-                    f"acidité {_fmt(r.get('acidity'), 2)} %{acid_flag}"
-                )
-            extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
-            response_text = f"Classement fournisseurs {scope_text} :\n" + "\n".join(lines) + extra + ctx_note
-        response_data = rows
-
-    # --- CYCLE DE VIE D'UN LOT -----------------------------------------------
-    elif intent == "lot_cycle_vie":
-        lot_ref = entities.get("lot_reference") or entities.get("code_lot")
-        if not lot_ref:
-            response_text = (
-                "Précisez la référence du lot. Exemple : "
-                "\"cycle de vie du lot LO07\" ou \"donne-moi le cycle de vie de lot15\"."
-            )
-            response_data = None
-        else:
-            result = service.get_lot_cycle_vie(lot_reference=lot_ref)
-            if result.get("error"):
-                response_text = result["error"]
-            else:
-                lot_info = result["lot"]
-                steps = result["steps"]
-                nb = len(steps)
-                remaining_steps = [step.get("etape") for step in steps[1:] if step.get("etape")]
-                history_text = " → ".join(remaining_steps) if remaining_steps else "aucune étape supplémentaire"
-                response_text = (
-                    f"Cycle de vie du lot **{lot_ref}** "
-                    f"({lot_info.get('variete', '?')}, fournisseur : {lot_info.get('fournisseur_nom', '?')}) :\n"
-                    f"{nb} étape(s) retracée(s) — réception → {history_text}."
-                )
-            response_data = result
-
-    # --- LISTE LOTS ----------------------------------------------------------
-    elif intent == "lot_liste":
-        query_start_date = start_date if explicit_period else None
-        query_end_date = end_date if explicit_period else None
-        non_conf = any(kw in payload.message.lower() for kw in ["non conforme", "lampante", "mauvaise"])
-        result = service.get_lot_liste(
-            huilerie, query_start_date, query_end_date, user_enterprise_id,
-            variete=entities.get("variete"),
-            non_conformes_only=non_conf,
-        )
-        rows = result.get("value") or []
-        if not rows:
-            label = "lots non conformes" if non_conf else "lots"
-            response_text = f"Aucun {label} trouvé pour {period_text}.{ctx_note}"
-        else:
-            lines = []
-            for r in rows[:8]:
-                lines.append(
-                    f"- **{r.get('reference')}** | {r.get('variete')} | "
-                    f"{r.get('fournisseur_nom')} | {r.get('quantite_initiale')} kg | "
-                    f"qualité : {r.get('qualite_huile') or 'N/D'}"
-                )
-            extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
-            response_text = f"Lots {scope_text} :\n" + "\n".join(lines) + extra + ctx_note
-        response_data = rows
-
-    # --- CAMPAGNE ------------------------------------------------------------
-    elif intent == "campagne":
-        annee = entities.get("campagne_annee")
-        result = service.get_campagnes(huilerie, user_enterprise_id, annee)
-        rows = result.get("value") or []
-        if not rows:
-            response_text = "Aucune campagne trouvée."
-        else:
-            lines = []
-            for r in rows:
-                lines.append(
-                    f"- **{r.get('reference')}** ({r.get('annee')}) | "
-                    f"{r.get('huilerie_nom')} | "
-                    f"du {r.get('date_debut')} au {r.get('date_fin')} | "
-                    f"{r.get('nb_lots') or 0} lots | "
-                    f"{_fmt(r.get('total_olives_kg'))} kg"
-                )
-            response_text = "Campagnes :\n" + "\n".join(lines)
-        response_data = rows
-
-    # --- ANALYSE LABO --------------------------------------------------------
-    elif intent == "analyse_labo":
-        lot_ref = entities.get("lot_reference") or entities.get("code_lot")
-        result = service.get_analyse_labo(huilerie, start_date, end_date, user_enterprise_id, lot_ref)
-        rows = result.get("value") or []
-        if not rows:
-            response_text = f"Aucune analyse laboratoire pour {period_text}.{ctx_note}"
-        else:
-            lines = []
-            for r in rows[:8]:
-                lines.append(
-                    f"- Lot **{r.get('lot_ref')}** ({r.get('date_analyse')}) — "
-                    f"acidité {_fmt(r.get('acidite_huile_pourcent'), 2)} %, "
-                    f"peroxyde {_fmt(r.get('indice_peroxyde_meq_o2_kg'), 1)}, "
-                    f"K270 {_fmt(r.get('k270'), 3)}"
-                )
-            extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
-            response_text = f"Analyses laboratoire {scope_text} :\n" + "\n".join(lines) + extra + ctx_note
-        response_data = rows
-
-    # --- MOUVEMENT STOCK -----------------------------------------------------
-    elif intent == "mouvement_stock":
-        result = service.get_mouvements_stock(huilerie, start_date, end_date, user_enterprise_id)
-        rows = result.get("value") or []
-        if not rows:
-            response_text = f"Aucun mouvement de stock pour {period_text}.{ctx_note}"
-        else:
-            lines = [
-                f"- **{r.get('type_mouvement')}** | lot {r.get('lot_ref')} | "
-                f"{r.get('date_mouvement')} — {r.get('commentaire') or ''}"
-                for r in rows[:8]
-            ]
-            response_text = f"Mouvements de stock {scope_text} :\n" + "\n".join(lines) + ctx_note
-        response_data = rows
-
-    # --- RECEPTION -----------------------------------------------------------
-    elif intent == "reception":
-        result = service.get_reception(huilerie, start_date, end_date, user_enterprise_id)
-        rows  = result.get("value") or []
-        total = result.get("total_kg", 0)
-        if not rows:
-            response_text = f"Aucune réception enregistrée pour {period_text}.{ctx_note}"
-        else:
-            lines = [
-                f"- Lot **{r.get('reference')}** | {r.get('variete')} | "
-                f"{r.get('fournisseur_nom')} | {_fmt(r.get('quantite_initiale'))} kg | "
-                f"{r.get('date_reception')}"
-                for r in rows[:8]
-            ]
-            response_text = (
-                f"Réceptions {scope_text} — total **{_fmt(total)} kg** :\n"
-                + "\n".join(lines) + ctx_note
-            )
-        response_data = {"lots": rows, "total_kg": total}
-
-    # --- UNKNOWN -------------------------------------------------------------
-    else:
-        logger.info("Intent non reconnu : %s", payload.message)
-        response_text = (
-            "Je n'ai pas compris votre demande. Vous pouvez me poser des questions sur :\n"
-            "- **Stock** d'olives ou d'huile\n"
-            "- **Production** et rendement\n"
-            "- **Machines** (état, utilisation)\n"
-            "- **Machines les plus utilisées**\n"
-            "- **Fournisseurs** (classement, qualité)\n"
-            "- **Cycle de vie** d'un lot (ex : *cycle de vie du lot LO07*)\n"
-            "- **Liste des lots** et lots non conformes\n"
-            "- **Qualité** et diagnostic\n"
-            "- **Analyses laboratoire**\n"
-            "- **Campagnes** de récolte\n"
-            "- **Mouvements de stock** et réceptions"
-        )
-        response_data = None
-
-    return _build_response(
+    response = _build_response(
         session_id=payload.session_id,
         payload_message=payload.message,
         intent=intent,
@@ -1274,3 +971,11 @@ def ask_chatbot(
         applied_scope=applied_scope,
         applied_permissions=applied_perms,
     )
+
+    logger.info(
+        "Chat response ready: intent=%s type=%s session_id=%s",
+        response.intent,
+        response.type,
+        payload.session_id,
+    )
+    return response

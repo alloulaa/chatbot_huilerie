@@ -2,7 +2,7 @@ import httpx
 import os
 
 from dotenv import load_dotenv
-from app.nlp.analyseur_llm import INVITE_SYSTEME
+from app.nlp.groq import SYSTEM_PROMPT as INVITE_SYSTEME
 
 
 load_dotenv()
