@@ -1,17 +1,9 @@
-"""
-chat_controller.py — Contrôleur principal du chatbot huilerie.
-
-Gère tous les intents :
-  stock, production, machine, machines_utilisees, rendement, prediction,
-  qualite, diagnostic, fournisseur, lot_cycle_vie, lot_liste, campagne,
-  reception, mouvement_stock, analyse_labo, unknown
-"""
-
 import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header
 
+from app.database import get_db_connection
 from app.models import ChatRequest, ChatResponse
 from app.nlp.analyseur_llm import analyser_message_sync
 from app.nlp.normalizer import resolve_period
@@ -29,6 +21,44 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatbotService()
 
 SESSION_CONTEXT: dict[str, dict] = {}
+
+
+# ---------------------------------------------------------------------------
+# Validation des privilèges
+# ---------------------------------------------------------------------------
+
+def _huilerie_belongs_to_enterprise(huilerie: str, enterprise_id: int) -> bool:
+    """Vérifier que la huilerie spécifiée appartient à l'entreprise donnée.
+    
+    Retourne True si la huilerie existe et appartient à l'entreprise,
+    False sinon.
+    """
+    if not huilerie or not enterprise_id:
+        return False
+    
+    connection = None
+    cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        
+        query = """
+            SELECT id_huilerie FROM huilerie
+            WHERE LOWER(nom) = LOWER(%s)
+            AND entreprise_id = %s
+            LIMIT 1
+        """
+        cursor.execute(query, (huilerie, enterprise_id))
+        result = cursor.fetchone()
+        return result is not None
+    except Exception as exc:
+        logger.warning("Error checking huilerie ownership: %s", exc)
+        return False
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
 
 
 # ---------------------------------------------------------------------------
@@ -73,24 +103,326 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 
 def _annotate_fournisseurs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Annotate supplier rows with status flags for acidite and rendement.
+    """Annotate supplier rows with status flags and guaranteed numeric fields.
 
-    Adds keys `acidite_status` and `rendement_status` with values
-    "ok" or "out of range" according to business rules.
+    Ensures that kg, acidity, rendement, lots are JSON numbers (float/int),
+    never strings. Also adds human-readable *_str variants and status flags.
     """
     annotated: list[dict[str, Any]] = []
     for r in rows:
-        acid = _safe_float(r.get("acidite_moyenne"), 0.0)
-        rend = _safe_float(r.get("rendement_moyen"), 0.0)
-        acid_status = "ok" if 0.2 <= acid <= 1.5 else "out of range"
-        rend_status = "ok" if 10.0 <= rend <= 30.0 else "out of range"
+        # --- Numeric extraction (always float) --------------------------------
+        kg: float = _safe_float(r.get("quantite_totale_kg"), 0.0)
+        acidity: float = _safe_float(r.get("acidite_moyenne"), 0.0)
+        rendement: float = _safe_float(r.get("rendement_moyen"), 0.0)
+        lots: int = int(_safe_float(r.get("nb_lots"), 0))
+
+        # --- Status flags based on business rules -----------------------------
+        acid_status = "ok" if 0.2 <= acidity <= 1.5 else "out of range"
+        rend_status = "ok" if 10.0 <= rendement <= 30.0 else "out of range"
+
+        # --- Human-readable string variants -----------------------------------
+        kg_str = f"{kg:,.0f} kg".replace(",", " ")
+        acidity_str = f"{acidity:.2f} %".replace(".", ",")
+        rendement_str = f"{rendement:.1f} %".replace(".", ",")
+
         nr = dict(r)
-        nr["acidite_moyenne"] = acid
-        nr["rendement_moyen"] = rend
+        # Overwrite with guaranteed numeric types
+        nr["kg"] = kg
+        nr["acidity"] = acidity
+        nr["rendement"] = rendement
+        nr["lots"] = lots
+        # Keep original snake_case keys for backward compat but also numeric
+        nr["quantite_totale_kg"] = kg
+        nr["acidite_moyenne"] = acidity
+        nr["rendement_moyen"] = rendement
+        nr["nb_lots"] = lots
+        # Friendly name alias
+        nr["name"] = r.get("fournisseur_nom") or "Inconnu"
+        # String variants (display only — never replaces numeric fields)
+        nr["kg_str"] = kg_str
+        nr["acidity_str"] = acidity_str
+        nr["rendement_str"] = rendement_str
+        # Status
         nr["acidite_status"] = acid_status
         nr["rendement_status"] = rend_status
         annotated.append(nr)
     return annotated
+
+
+def _build_fournisseur_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a structured, chart-friendly payload for supplier ranking.
+
+    Returns a dict with two complementary representations:
+    - ``suppliers``: list of objects with guaranteed numeric fields (kg, acidity,
+      rendement, lots) plus optional string variants.
+    - ``labels`` / ``datasets``: Chart.js-compatible multi-dataset structure
+      where every value in ``datasets[].data`` is a JSON number.
+    """
+    suppliers: list[dict[str, Any]] = []
+    labels: list[str] = []
+    ds_kg: list[float] = []
+    ds_acidity: list[float] = []
+    ds_rendement: list[float] = []
+
+    for r in annotated:
+        name: str = str(r.get("name") or r.get("fournisseur_nom") or "Inconnu")
+        kg: float = _safe_float(r.get("kg") or r.get("quantite_totale_kg"), 0.0)
+        acidity: float = _safe_float(r.get("acidity") or r.get("acidite_moyenne"), 0.0)
+        rendement: float = _safe_float(r.get("rendement") or r.get("rendement_moyen"), 0.0)
+        lots: int = int(_safe_float(r.get("lots") or r.get("nb_lots"), 0))
+
+        suppliers.append({
+            "rang": r.get("rang"),
+            "name": name,
+            "fournisseur_nom": name,  # backward compat
+            "kg": kg,
+            "acidity": acidity,
+            "rendement": rendement,
+            "lots": lots,
+            # String variants for display (optional)
+            "kg_str": r.get("kg_str", f"{kg:,.0f} kg".replace(",", " ")),
+            "acidity_str": r.get("acidity_str", f"{acidity:.2f} %".replace(".", ",")),
+            "rendement_str": r.get("rendement_str", f"{rendement:.1f} %".replace(".", ",")),
+            # Status flags
+            "acidite_status": r.get("acidite_status", "ok"),
+            "rendement_status": r.get("rendement_status", "ok"),
+        })
+
+        labels.append(name)
+        ds_kg.append(kg)
+        ds_acidity.append(acidity)
+        ds_rendement.append(rendement)
+
+    datasets = [
+        {"label": "Quantité totale (kg)", "data": ds_kg, "type": "bar"},
+        {"label": "Acidité moyenne (%)", "data": ds_acidity, "type": "line"},
+        {"label": "Rendement moyen (%)", "data": ds_rendement, "type": "line"},
+    ]
+
+    return {
+        "suppliers": suppliers,
+        # Chart.js-compatible multi-dataset structure
+        "labels": labels,
+        "datasets": datasets,
+    }
+
+
+def _annotate_machines(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Annotate machine usage rows with guaranteed numeric fields."""
+    annotated: list[dict[str, Any]] = []
+    for idx, r in enumerate(rows, start=1):
+        nom: str = r.get("nomMachine") or r.get("nom_machine") or "Machine inconnue"
+        ref: str = r.get("machineRef") or r.get("machine_ref") or "N/D"
+        nb_exec: int = int(_safe_float(r.get("nbExecutions") or r.get("nb_executions"), 0))
+        rend_moy: float = _safe_float(r.get("rendementMoyen") or r.get("rendement_moyen"), 0.0)
+        total_prod: float = _safe_float(r.get("totalProduit") or r.get("total_produit"), 0.0)
+
+        nr = dict(r)
+        nr["rang"] = idx
+        nr["nomMachine"] = nom
+        nr["machineRef"] = ref
+        nr["nbExecutions"] = nb_exec
+        nr["rendementMoyen"] = rend_moy
+        nr["totalProduit"] = total_prod
+        nr["name"] = nom
+
+        # String variants for display
+        nr["nb_exec_str"] = str(nb_exec)
+        nr["rend_str"] = f"{rend_moy:.1f} %".replace(".", ",")
+        nr["prod_str"] = f"{total_prod:,.0f} L".replace(",", " ")
+
+        annotated.append(nr)
+    return annotated
+
+
+def _build_machines_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build chart-friendly payload for machine ranking."""
+    machines: list[dict[str, Any]] = []
+    labels: list[str] = []
+    ds_exec: list[int] = []
+    ds_rend: list[float] = []
+    ds_prod: list[float] = []
+
+    for r in annotated:
+        nom = r.get("name") or r.get("nomMachine") or "Inconnue"
+        nb_exec = int(_safe_float(r.get("nbExecutions"), 0))
+        rend_moy = _safe_float(r.get("rendementMoyen"), 0.0)
+        total_prod = _safe_float(r.get("totalProduit"), 0.0)
+
+        machines.append({
+            "rang": r.get("rang"),
+            "name": nom,
+            "nomMachine": nom,
+            "machineRef": r.get("machineRef", "N/D"),
+            "nbExecutions": nb_exec,
+            "rendementMoyen": rend_moy,
+            "totalProduit": total_prod,
+            "nb_exec_str": r.get("nb_exec_str"),
+            "rend_str": r.get("rend_str"),
+            "prod_str": r.get("prod_str"),
+        })
+
+        labels.append(nom)
+        ds_exec.append(nb_exec)
+        ds_rend.append(rend_moy)
+        ds_prod.append(total_prod)
+
+    datasets = [
+        {"label": "Exécutions", "data": ds_exec, "type": "bar"},
+        {"label": "Rendement moyen (%)", "data": ds_rend, "type": "line"},
+        {"label": "Production (L)", "data": ds_prod, "type": "bar"},
+    ]
+
+    return {
+        "machines": machines,
+        "labels": labels,
+        "datasets": datasets,
+    }
+
+
+def _annotate_lots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Annotate lot list rows with guaranteed numeric fields."""
+    annotated: list[dict[str, Any]] = []
+    for idx, r in enumerate(rows, start=1):
+        ref: str = r.get("reference") or "N/D"
+        var: str = r.get("variete") or "N/D"
+        fournisseur: str = r.get("fournisseur_nom") or "N/D"
+        qte: float = _safe_float(r.get("quantite_initiale"), 0.0)
+        qualite: str = r.get("qualite_huile") or "N/D"
+
+        nr = dict(r)
+        nr["rang"] = idx
+        nr["reference"] = ref
+        nr["variete"] = var
+        nr["fournisseur_nom"] = fournisseur
+        nr["quantite_initiale"] = qte
+        nr["qualite_huile"] = qualite
+        nr["name"] = ref
+
+        nr["qte_str"] = f"{qte:,.0f} kg".replace(",", " ")
+        annotated.append(nr)
+    return annotated
+
+
+def _build_lots_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build chart-friendly payload for lot listing."""
+    lots: list[dict[str, Any]] = []
+    labels: list[str] = []
+    ds_qte: list[float] = []
+
+    for r in annotated:
+        ref = r.get("name") or r.get("reference") or "N/D"
+        qte = _safe_float(r.get("quantite_initiale"), 0.0)
+
+        lots.append({
+            "rang": r.get("rang"),
+            "name": ref,
+            "reference": ref,
+            "variete": r.get("variete", "N/D"),
+            "fournisseur_nom": r.get("fournisseur_nom", "N/D"),
+            "quantite_initiale": qte,
+            "qualite_huile": r.get("qualite_huile", "N/D"),
+            "qte_str": r.get("qte_str"),
+        })
+
+        labels.append(ref)
+        ds_qte.append(qte)
+
+    datasets = [
+        {"label": "Quantité (kg)", "data": ds_qte, "type": "bar"},
+    ]
+
+    return {
+        "lots": lots,
+        "labels": labels,
+        "datasets": datasets,
+    }
+
+
+def _annotate_analyses(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Annotate lab analysis rows with guaranteed numeric fields."""
+    annotated: list[dict[str, Any]] = []
+    for idx, r in enumerate(rows, start=1):
+        lot_ref: str = r.get("lot_ref") or "N/D"
+        date: str = r.get("date_analyse") or "N/D"
+        acidity: float = _safe_float(r.get("acidite_huile_pourcent"), 0.0)
+        peroxide: float = _safe_float(r.get("indice_peroxyde_meq_o2_kg"), 0.0)
+        k270: float = _safe_float(r.get("k270"), 0.0)
+
+        # Status flags for quality
+        acidity_status = "ok" if 0.2 <= acidity <= 0.8 else "out of range"
+        peroxide_status = "ok" if peroxide <= 20.0 else "out of range"
+        k270_status = "ok" if k270 <= 0.25 else "out of range"
+
+        nr = dict(r)
+        nr["rang"] = idx
+        nr["lot_ref"] = lot_ref
+        nr["date_analyse"] = date
+        nr["acidite_huile_pourcent"] = acidity
+        nr["indice_peroxyde_meq_o2_kg"] = peroxide
+        nr["k270"] = k270
+        nr["name"] = lot_ref
+
+        # String variants
+        nr["acid_str"] = f"{acidity:.2f} %".replace(".", ",")
+        nr["peroxide_str"] = f"{peroxide:.1f}".replace(".", ",")
+        nr["k270_str"] = f"{k270:.3f}".replace(".", ",")
+
+        # Status
+        nr["acidity_status"] = acidity_status
+        nr["peroxide_status"] = peroxide_status
+        nr["k270_status"] = k270_status
+
+        annotated.append(nr)
+    return annotated
+
+
+def _build_analyses_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build chart-friendly payload for lab analysis ranking."""
+    analyses: list[dict[str, Any]] = []
+    labels: list[str] = []
+    ds_acid: list[float] = []
+    ds_perox: list[float] = []
+    ds_k270: list[float] = []
+
+    for r in annotated:
+        lot_ref = r.get("name") or r.get("lot_ref") or "N/D"
+        acidity = _safe_float(r.get("acidite_huile_pourcent"), 0.0)
+        peroxide = _safe_float(r.get("indice_peroxyde_meq_o2_kg"), 0.0)
+        k270 = _safe_float(r.get("k270"), 0.0)
+
+        analyses.append({
+            "rang": r.get("rang"),
+            "name": lot_ref,
+            "lot_ref": lot_ref,
+            "date_analyse": r.get("date_analyse", "N/D"),
+            "acidite_huile_pourcent": acidity,
+            "indice_peroxyde_meq_o2_kg": peroxide,
+            "k270": k270,
+            "acid_str": r.get("acid_str"),
+            "peroxide_str": r.get("peroxide_str"),
+            "k270_str": r.get("k270_str"),
+            "acidity_status": r.get("acidity_status"),
+            "peroxide_status": r.get("peroxide_status"),
+            "k270_status": r.get("k270_status"),
+        })
+
+        labels.append(lot_ref)
+        ds_acid.append(acidity)
+        ds_perox.append(peroxide)
+        ds_k270.append(k270)
+
+    datasets = [
+        {"label": "Acidité (%)", "data": ds_acid, "type": "bar"},
+        {"label": "Peroxyde (meq O2/kg)", "data": ds_perox, "type": "line"},
+        {"label": "K270", "data": ds_k270, "type": "line"},
+    ]
+
+    return {
+        "analyses": analyses,
+        "labels": labels,
+        "datasets": datasets,
+    }
 
 
 def _chart_type_for(intent: str, rows: list[dict[str, Any]] | dict[str, Any] | None) -> str:
@@ -123,16 +455,40 @@ def _chart_data_for(intent: str, data: Any) -> Any:
 
         label_keys = {
             "stock": ["variete", "label"],
-            "fournisseur": ["fournisseur_nom", "label"],
+            "fournisseur": ["fournisseur_nom", "name", "label"],
             "machines_utilisees": ["nomMachine", "machineRef", "nom_machine", "machine_ref", "label"],
             "lot_liste": ["reference", "lot_ref", "label"],
             "campagne": ["reference", "annee", "label"],
             "analyse_labo": ["lot_ref", "reference", "label"],
             "reception": ["reference", "lot_ref", "label"],
         }
+
+        # --- Special fournisseur handling: always produce multi-dataset -------
+        if intent == "fournisseur":
+            annotated = _annotate_fournisseurs(data)
+            payload = _build_fournisseur_payload(annotated)
+            return {"labels": payload["labels"], "datasets": payload["datasets"]}
+
+        # --- Special machines_utilisees handling ------
+        if intent == "machines_utilisees":
+            annotated = _annotate_machines(data)
+            payload = _build_machines_payload(annotated)
+            return {"labels": payload["labels"], "datasets": payload["datasets"]}
+
+        # --- Special lot_liste handling ------
+        if intent == "lot_liste":
+            annotated = _annotate_lots(data)
+            payload = _build_lots_payload(annotated)
+            return {"labels": payload["labels"], "datasets": payload["datasets"]}
+
+        # --- Special analyse_labo handling ------
+        if intent == "analyse_labo":
+            annotated = _annotate_analyses(data)
+            payload = _build_analyses_payload(annotated)
+            return {"labels": payload["labels"], "datasets": payload["datasets"]}
+
         value_keys = {
             "stock": ["total_stock", "value"],
-            "fournisseur": ["quantite_totale_kg", "nb_lots", "value"],
             "machines_utilisees": ["nbExecutions", "nb_executions", "totalProduit", "total_produit", "value"],
             "lot_liste": ["quantite_initiale", "value"],
             "campagne": ["total_olives_kg", "nb_lots", "value"],
@@ -143,7 +499,6 @@ def _chart_data_for(intent: str, data: Any) -> Any:
         labels_keys = label_keys.get(intent, ["label", "reference", "name", "nom", "title"])
         preferred_values = value_keys.get(intent, ["value", "total", "count"])
 
-        # build labels array
         labels: list[str] = []
         for index, row in enumerate(data, start=1):
             label = None
@@ -156,13 +511,11 @@ def _chart_data_for(intent: str, data: Any) -> Any:
                 label = f"Item {index}"
             labels.append(str(label))
 
-        # detect available numeric metrics, prioritizing known keys
         preferred_order = list(dict.fromkeys(preferred_values + [
             "quantite_totale_kg", "quantite_initiale", "total_produit", "total_stock",
             "rendement_moyen", "acidite_huile_pourcent", "indice_peroxyde_meq_o2_kg", "k270",
             "value", "total", "count", "nb_lots"
         ]))
-        # also accept camelCase variants produced by updated services
         camel_variants = [
             "quantiteTotaleKg", "quantiteInitiale", "totalProduit", "totalStock",
             "rendementMoyen", "aciditeMoyenne", "indicePeroxydeMeqO2Kg", "k270",
@@ -177,7 +530,6 @@ def _chart_data_for(intent: str, data: Any) -> Any:
             if any(row.get(key) not in (None, "") for row in data):
                 metrics.append(key)
 
-        # fallback: detect any numeric keys present in rows
         if not metrics:
             detected = set()
             for row in data:
@@ -192,38 +544,15 @@ def _chart_data_for(intent: str, data: Any) -> Any:
                             pass
             metrics = sorted(detected)
 
-        # if no numeric metric found, return counts per label (fallback behaviour)
         if not metrics:
             return [{"label": labels[i], "value": 1.0} for i in range(len(labels))]
 
-        # single metric -> return old point format for backward compatibility
         if len(metrics) == 1:
             metric = metrics[0]
             points: list[dict[str, Any]] = []
             for i, row in enumerate(data):
                 points.append({"label": labels[i], "value": _safe_float(row.get(metric), 0.0)})
             return points
-
-        # multiple metrics -> return Chart.js friendly multi-dataset structure
-        # Special handling for fournisseur: show ONLY quantite_totale_kg as bars (no dual-axis)
-        if intent == "fournisseur":
-            # Extract quantity metric for bars
-            qty_key = None
-            for k in ("quantite_totale_kg", "quantiteTotaleKg", "quantite", "value"):
-                if k in metrics:
-                    qty_key = k
-                    break
-
-            datasets = []
-            if qty_key:
-                series = [ _safe_float(row.get(qty_key), 0.0) for row in data ]
-                datasets.append({
-                    "label": "Quantité livrée (kg)",
-                    "data": series,
-                    "type": "bar",
-                })
-            
-            return {"labels": labels, "datasets": datasets}
 
         datasets: list[dict[str, Any]] = []
         for metric in metrics:
@@ -235,6 +564,10 @@ def _chart_data_for(intent: str, data: Any) -> Any:
         return {"labels": labels, "datasets": datasets}
 
     if isinstance(data, dict):
+        # If already a pre-built chart payload, pass through
+        if "labels" in data and "datasets" in data:
+            return data
+
         summary = data.get("summary")
         if isinstance(summary, dict) and summary:
             return [{"label": str(label), "value": _safe_float(value, 0.0)} for label, value in summary.items()]
@@ -303,6 +636,90 @@ def _build_response(
 
     wants_chart = _is_chart_request(payload_message)
     is_choice_candidate = isinstance(response_data, list) and len(response_data) > 1
+
+    # Special handling for structured ranking intents
+    ranking_intents = {"fournisseur", "machines_utilisees", "lot_liste", "analyse_labo"}
+    
+    if intent in ranking_intents and isinstance(response_data, list) and response_data:
+        # Annotate and structure the data
+        if intent == "fournisseur":
+            annotated = _annotate_fournisseurs(response_data)
+            structured_payload = _build_fournisseur_payload(annotated)
+            title_default = "Voici une visualisation des fournisseurs."
+        elif intent == "machines_utilisees":
+            annotated = _annotate_machines(response_data)
+            structured_payload = _build_machines_payload(annotated)
+            title_default = "Voici une visualisation des machines."
+        elif intent == "lot_liste":
+            annotated = _annotate_lots(response_data)
+            structured_payload = _build_lots_payload(annotated)
+            title_default = "Voici une visualisation des lots."
+        elif intent == "analyse_labo":
+            annotated = _annotate_analyses(response_data)
+            structured_payload = _build_analyses_payload(annotated)
+            title_default = "Voici une visualisation des analyses."
+        else:
+            structured_payload = None
+            title_default = "Voici une visualisation des résultats."
+
+        if structured_payload:
+            chart_data = {
+                "labels": structured_payload["labels"],
+                "datasets": structured_payload["datasets"],
+            }
+            chart_type = "bar"
+
+            if wants_chart:
+                ctx.pop("pending_visualization", None)
+                return ChatResponse(
+                    type="chart",
+                    message=response_text or title_default,
+                    intent=intent,
+                    confidence=confidence,
+                    entities=entities,
+                    response=response_text or title_default,
+                    chart_type=chart_type,
+                    data=chart_data,
+                    applied_scope=applied_scope,
+                    applied_permissions=applied_permissions,
+                )
+
+            if len(response_data) > 1:
+                ctx["pending_visualization"] = {
+                    "text_message": response_text,
+                    "chart_data": chart_data,
+                    "chart_type": chart_type,
+                    "raw_data": structured_payload,
+                }
+                question = "Souhaitez-vous voir les résultats sous forme de texte ou de graphique ?"
+                return ChatResponse(
+                    type="choice",
+                    message=question,
+                    intent=intent,
+                    confidence=confidence,
+                    entities=entities,
+                    response=question,
+                    options=["texte", "graphique"],
+                    chart_type=chart_type,
+                    data=structured_payload,
+                    applied_scope=applied_scope,
+                    applied_permissions=applied_permissions,
+                    pending_choice=True,
+                )
+
+            # Single item — return text with structured data
+            ctx.pop("pending_visualization", None)
+            return ChatResponse(
+                type="text",
+                message=response_text,
+                intent=intent,
+                confidence=confidence,
+                entities=entities,
+                response=response_text,
+                data=structured_payload,
+                applied_scope=applied_scope,
+                applied_permissions=applied_permissions,
+            )
 
     if is_choice_candidate:
         chart_data = _chart_data_for(intent, response_data)
@@ -454,6 +871,21 @@ def ask_chatbot(
     explicit_huilerie = entities.get("huilerie")
     explicit_period = entities.get("period_label")
 
+    # ── Validation des privilèges : vérifier que la huilerie explicite appartient à l'entreprise
+    if explicit_huilerie and user_enterprise_id:
+        if not _huilerie_belongs_to_enterprise(explicit_huilerie, user_enterprise_id):
+            return ChatResponse(
+                type="text",
+                message=f"L'huilerie '{explicit_huilerie}' n'appartient pas à votre entreprise ou n'existe pas.",
+                intent=intent,
+                confidence=confidence,
+                entities=entities,
+                response=f"L'huilerie '{explicit_huilerie}' n'appartient pas à votre entreprise ou n'existe pas.",
+                data=None,
+                applied_scope={},
+                applied_permissions=applied_perms,
+            )
+
     huilerie = explicit_huilerie or ctx.get("last_huilerie") or None
     period_label = explicit_period or ctx.get("last_period") or "aujourd_hui"
 
@@ -534,17 +966,15 @@ def ask_chatbot(
             lines = []
             for r in rows[:5]:
                 nom = r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')
-                ref = r.get('machineRef') or r.get('machine_ref') or r.get('reference') or 'N/D'
                 nb = r.get('nbExecutions') or r.get('nb_executions') or 0
                 rend = r.get('rendementMoyen') or r.get('rendement_moyen') or 0.0
                 total = r.get('totalProduit') or r.get('total_produit') or 0.0
                 lines.append(
-                    f"- **{nom}** ({ref}) — "
-                    f"{nb} exécution(s), "
-                    f"rendement moyen {_fmt(rend, 1)} %, "
-                    f"{_fmt(total)} L produits"
+                    f"- **{nom}** — {nb} exécution(s), "
+                    f"rendement {_fmt(rend, 1)} %, {_fmt(total)} L produits"
                 )
-            response_text = f"Machines les plus utilisées {scope_text} :\n" + "\n".join(lines) + ctx_note
+            extra = f" *(+{len(rows) - 5} autres)*" if len(rows) > 5 else ""
+            response_text = f"Machines les plus utilisées {scope_text} :\n" + "\n".join(lines) + extra + ctx_note
         response_data = rows
 
     # --- RENDEMENT -----------------------------------------------------------
@@ -602,31 +1032,28 @@ def ask_chatbot(
             response_text = f"Tous les paramètres sont conformes {scope_text}.{ctx_note}"
         response_data = result
 
-    # --- MEILLEUR FOURNISSEUR ← NOUVELLE -------------------------------------
+    # --- MEILLEUR FOURNISSEUR ------------------------------------------------
     elif intent == "fournisseur":
         result = service.get_meilleur_fournisseur(huilerie, start_date, end_date, user_enterprise_id)
         rows = result.get("value") or []
-        annotated = _annotate_fournisseurs(rows)
-        if not annotated:
+        if not rows:
             response_text = f"Aucune donnée fournisseur disponible pour {period_text}.{ctx_note}"
         else:
+            annotated = _annotate_fournisseurs(rows)
             lines = []
             for r in annotated[:8]:
-                acid_flag = " ⚠️ (out of range)" if r.get("acidite_status") == "out of range" else ""
-                rend_flag = " ⚠️ (out of range)" if r.get("rendement_status") == "out of range" else ""
+                acid_flag = " ⚠️" if r.get("acidite_status") == "out of range" else ""
+                rend_flag = " ⚠️" if r.get("rendement_status") == "out of range" else ""
                 lines.append(
-                    f"{r.get('rang', '?')}. **{r.get('fournisseur_nom')}** — "
-                    f"{r.get('nb_lots', 0)} lot(s), "
-                    f"{_fmt(r.get('quantite_totale_kg'))} kg livrés, "
-                    f"rendement moyen {_fmt(r.get('rendement_moyen'), 1)} %{rend_flag}, "
-                    f"acidité moy. {_fmt(r.get('acidite_moyenne'), 2)} %{acid_flag}"
+                    f"{r.get('rang', '?')}. **{r.get('fournisseur_nom')}** — {r.get('lots', 0)} lot(s), "
+                    f"{_fmt(r.get('kg'))} kg, rendement {_fmt(r.get('rendement'), 1)} %{rend_flag}, "
+                    f"acidité {_fmt(r.get('acidity'), 2)} %{acid_flag}"
                 )
-            extra = f" *(+{len(annotated) - 8} autres)*" if len(annotated) > 8 else ""
+            extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
             response_text = f"Classement fournisseurs {scope_text} :\n" + "\n".join(lines) + extra + ctx_note
-        # return the annotated list so chart builder can create appropriate datasets
-        response_data = annotated
+        response_data = rows
 
-    # --- CYCLE DE VIE D'UN LOT ← NOUVELLE ------------------------------------
+    # --- CYCLE DE VIE D'UN LOT -----------------------------------------------
     elif intent == "lot_cycle_vie":
         lot_ref = entities.get("lot_reference") or entities.get("code_lot")
         if not lot_ref:
@@ -652,7 +1079,7 @@ def ask_chatbot(
                 )
             response_data = result
 
-    # --- LISTE LOTS ← NOUVELLE -----------------------------------------------
+    # --- LISTE LOTS ----------------------------------------------------------
     elif intent == "lot_liste":
         non_conf = any(kw in payload.message.lower() for kw in ["non conforme", "lampante", "mauvaise"])
         result = service.get_lot_liste(
@@ -676,7 +1103,7 @@ def ask_chatbot(
             response_text = f"Lots {scope_text} :\n" + "\n".join(lines) + extra + ctx_note
         response_data = rows
 
-    # --- CAMPAGNE ← NOUVELLE -------------------------------------------------
+    # --- CAMPAGNE ------------------------------------------------------------
     elif intent == "campagne":
         annee = entities.get("campagne_annee")
         result = service.get_campagnes(huilerie, user_enterprise_id, annee)
@@ -696,7 +1123,7 @@ def ask_chatbot(
             response_text = "Campagnes :\n" + "\n".join(lines)
         response_data = rows
 
-    # --- ANALYSE LABO ← NOUVELLE ---------------------------------------------
+    # --- ANALYSE LABO --------------------------------------------------------
     elif intent == "analyse_labo":
         lot_ref = entities.get("lot_reference") or entities.get("code_lot")
         result = service.get_analyse_labo(huilerie, start_date, end_date, user_enterprise_id, lot_ref)
@@ -705,17 +1132,18 @@ def ask_chatbot(
             response_text = f"Aucune analyse laboratoire pour {period_text}.{ctx_note}"
         else:
             lines = []
-            for r in rows[:5]:
+            for r in rows[:8]:
                 lines.append(
                     f"- Lot **{r.get('lot_ref')}** ({r.get('date_analyse')}) — "
                     f"acidité {_fmt(r.get('acidite_huile_pourcent'), 2)} %, "
                     f"peroxyde {_fmt(r.get('indice_peroxyde_meq_o2_kg'), 1)}, "
                     f"K270 {_fmt(r.get('k270'), 3)}"
                 )
-            response_text = f"Analyses laboratoire {scope_text} :\n" + "\n".join(lines) + ctx_note
+            extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
+            response_text = f"Analyses laboratoire {scope_text} :\n" + "\n".join(lines) + extra + ctx_note
         response_data = rows
 
-    # --- MOUVEMENT STOCK ← NOUVELLE ------------------------------------------
+    # --- MOUVEMENT STOCK -----------------------------------------------------
     elif intent == "mouvement_stock":
         result = service.get_mouvements_stock(huilerie, start_date, end_date, user_enterprise_id)
         rows = result.get("value") or []
@@ -730,7 +1158,7 @@ def ask_chatbot(
             response_text = f"Mouvements de stock {scope_text} :\n" + "\n".join(lines) + ctx_note
         response_data = rows
 
-    # --- RECEPTION ← NOUVELLE ------------------------------------------------
+    # --- RECEPTION -----------------------------------------------------------
     elif intent == "reception":
         result = service.get_reception(huilerie, start_date, end_date, user_enterprise_id)
         rows  = result.get("value") or []

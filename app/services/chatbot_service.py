@@ -596,6 +596,7 @@ class ChatbotService:
     def get_lot_cycle_vie(
         self,
         lot_reference: str,
+        enterprise_id: int | None = None,
     ) -> dict[str, Any]:
         normalized_ref = self._normalize_lot_reference(lot_reference)
         if not normalized_ref:
@@ -615,10 +616,15 @@ class ChatbotService:
                 h.nom AS huilerie_nom
             FROM lot_olives lo
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
-            WHERE LOWER(lo.reference) = LOWER(%s)
-               OR CAST(lo.id_lot AS CHAR) = %s
-            LIMIT 1
+            WHERE (LOWER(lo.reference) = LOWER(%s)
+               OR CAST(lo.id_lot AS CHAR) = %s)
         """
+        
+        params_lot: list[Any] = [normalized_ref, normalized_ref]
+        if enterprise_id is not None:
+            query_lot += " AND h.entreprise_id = %s"
+            params_lot.append(enterprise_id)
+        query_lot += " LIMIT 1"
 
         query_exec = """
             SELECT reference, date_debut, date_fin_reelle, statut, rendement
@@ -646,7 +652,7 @@ class ChatbotService:
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute(query_lot, (normalized_ref, normalized_ref))
+            cursor.execute(query_lot, tuple(params_lot))
             lot_row = cursor.fetchone()
             if not lot_row:
                 return {"error": f"Aucun lot trouvé pour {normalized_ref}."}

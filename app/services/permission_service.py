@@ -8,6 +8,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - defensive startup guard
     httpx = None
 
+from app.database import get_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,69 @@ def is_intent_allowed(intent: str, permissions: list[dict[str, Any]] | None) -> 
             return bool(perm.get("canRead") if perm.get("canRead") is not None else perm.get("can_read"))
 
     return False
+
+
+def is_huilerie_allowed(
+    huilerie_name: str | None, 
+    enterprise_id: int | None,
+    jwt_token: str | None = None
+) -> bool:
+    """Check if a huilerie name belongs to a given enterprise by querying the database.
+    
+    Returns True if:
+    - No huilerie specified (no restriction)
+    - No enterprise_id provided (cannot validate)
+    - Huilerie found and belongs to enterprise
+    
+    Returns False if:
+    - Huilerie explicitly does NOT belong to enterprise
+    """
+    if not huilerie_name or not enterprise_id:
+        return True
+    
+    connection = None
+    cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        
+        # Query: check if huilerie with given name belongs to the enterprise
+        query = """
+            SELECT h.id_huilerie, h.entreprise_id
+            FROM huilerie h
+            WHERE LOWER(h.nom) = LOWER(%s)
+            LIMIT 1
+        """
+        cursor.execute(query, (huilerie_name,))
+        row = cursor.fetchone()
+        
+        if not row:
+            # Huilerie not found in database
+            logger.warning("Huilerie '%s' not found in database", huilerie_name)
+            return False
+        
+        huilerie_enterprise_id = row.get("entreprise_id")
+        if huilerie_enterprise_id != enterprise_id:
+            # Huilerie found but belongs to different enterprise
+            logger.warning(
+                "Huilerie '%s' (enterprise %s) access denied for user in enterprise %s",
+                huilerie_name, huilerie_enterprise_id, enterprise_id
+            )
+            return False
+        
+        # Huilerie belongs to user's enterprise
+        return True
+        
+    except Exception as exc:
+        logger.exception("Error validating huilerie '%s' against enterprise %s: %s", 
+                         huilerie_name, enterprise_id, exc)
+        # On error, allow the query to proceed (fail open for robustness)
+        return True
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
 
 
 def get_user_huilerie(auth_data: dict[str, Any] | None, jwt_token: str | None = None) -> str | None:
