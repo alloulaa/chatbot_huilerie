@@ -638,7 +638,7 @@ def _build_response(
     is_choice_candidate = isinstance(response_data, list) and len(response_data) > 1
 
     # Special handling for structured ranking intents
-    ranking_intents = {"fournisseur", "machines_utilisees", "lot_liste", "analyse_labo"}
+    ranking_intents = {"fournisseur", "machines_utilisees", "lot_liste", "analyse_labo", "stock"}
     
     if intent in ranking_intents and isinstance(response_data, list) and response_data:
         # Annotate and structure the data
@@ -658,6 +658,23 @@ def _build_response(
             annotated = _annotate_analyses(response_data)
             structured_payload = _build_analyses_payload(annotated)
             title_default = "Voici une visualisation des analyses."
+        elif intent == "stock":
+            # Stock: simple list format with labels and items
+            items = response_data
+            labels = [item.get("reference_stock", "N/D") for item in items]
+            structured_payload = {
+                "labels": labels,
+                "items": items,
+                "value": items,
+                "datasets": [{
+                    "label": "Quantité disponible (kg)",
+                    "data": [item.get("quantite_disponible", 0) for item in items],
+                    "backgroundColor": "#4CAF50",
+                    "borderColor": "#2E7D32",
+                    "borderWidth": 1
+                }]
+            }
+            title_default = "Voici le stock disponible."
         else:
             structured_payload = None
             title_default = "Voici une visualisation des résultats."
@@ -850,6 +867,27 @@ def ask_chatbot(
         "campagne_annee": resultat.get("campagne_annee"),
     }
 
+    # ── Intent Override : priorité aux mots-clés explicites du message ──
+    _msg_lower = payload.message.lower().strip()
+    _stock_keywords  = ["stock", "inventaire", "quantite disponible", "reserve d'olive"]
+    _lot_keywords    = ["liste lot", "liste des lots", "lots non conformes",
+                        "tracabilite", "tous les lots", "lots recus", "lots de"]
+    _has_stock_word  = any(k in _msg_lower for k in _stock_keywords)
+    _has_lot_word    = any(k in _msg_lower for k in _lot_keywords)
+
+    if _has_stock_word and not _has_lot_word and intent != "stock":
+        logger.info(
+            "Intent override: '%s' → 'stock' (message contains stock keyword)", intent
+        )
+        intent = "stock"
+
+    # Si le message contient "liste des lots" ou commence par "lots"
+    _lot_list_keywords = ["liste lot", "liste des lots", "tous les lots"]
+    if any(k in _msg_lower for k in _lot_list_keywords) \
+            and intent not in ("lot_liste", "lot_cycle_vie"):
+        logger.info("Intent override: '%s' → 'lot_liste'", intent)
+        intent = "lot_liste"
+
     # ── RBAC ─────────────────────────────────────────────────────────────────
     if jwt and auth_data and not user_is_admin and not auth_data.get("_auth_unavailable"):
         if not is_intent_allowed(intent, auth_data.get("permissions", [])):
@@ -922,18 +960,35 @@ def ask_chatbot(
 
     # --- STOCK ---------------------------------------------------------------
     if intent == "stock":
-        result = service.get_stock(huilerie, start_date, end_date, user_enterprise_id)
+        result = service.get_stock(huilerie, None, None, user_enterprise_id)
         rows = result.get("value") or []
+
         if not rows:
-            response_text = f"Aucune donnée de stock pour {period_text}.{ctx_note}"
+            scope_part = f" pour l'huilerie **{huilerie}**" if huilerie else ""
+            response_text = f"Aucune donnée de stock disponible{scope_part}.{ctx_note}"
+            response_data = []
         else:
-            lines = [f"- {r['variete']} : **{_fmt(r['total_stock'])} kg**" for r in rows]
-            response_text = f"Stock {scope_text} :\n" + "\n".join(lines) + ctx_note
-        response_data = rows
+            # Texte résumé
+            lines = []
+            for r in rows:
+                ref  = r.get("reference_stock") or "N/D"
+                var  = r.get("variete") or "Inconnue"
+                qte  = r.get("quantite_disponible") or r.get("total_stock") or 0
+                lot  = r.get("lot_reference") or ""
+                lot_part = f" | lot : **{lot}**" if lot else ""
+                lines.append(f"- **{ref}** | {var} | **{_fmt(qte)} kg**{lot_part}")
+
+            scope_part = f" de l'huilerie **{huilerie}**" if huilerie else ""
+            response_text = f"Stock{scope_part} :\n" + "\n".join(lines) + ctx_note
+
+            # Données structurées pour le widget Angular
+            response_data = rows
 
     # --- PRODUCTION ----------------------------------------------------------
     elif intent == "production":
-        result = service.get_production(huilerie, start_date, end_date, user_enterprise_id)
+        query_start_date = start_date if explicit_period else None
+        query_end_date = end_date if explicit_period else None
+        result = service.get_production(huilerie, query_start_date, query_end_date, user_enterprise_id)
         total = result.get("value", 0)
         if total <= 0:
             response_text = f"Aucune production enregistrée pour {period_text}.{ctx_note}"
@@ -958,7 +1013,10 @@ def ask_chatbot(
 
     # --- MACHINES LES PLUS UTILISÉES -----------------------------------------
     elif intent == "machines_utilisees":
-        result = service.get_machines_utilisees(huilerie, start_date, end_date, user_enterprise_id)
+        # Only apply date filter if user explicitly mentioned a period
+        query_start_date = start_date if explicit_period else None
+        query_end_date = end_date if explicit_period else None
+        result = service.get_machines_utilisees(huilerie, query_start_date, query_end_date, user_enterprise_id)
         rows = result.get("value") or []
         if not rows:
             response_text = f"Aucune donnée d'utilisation machines {scope_text}.{ctx_note}"
@@ -979,7 +1037,9 @@ def ask_chatbot(
 
     # --- RENDEMENT -----------------------------------------------------------
     elif intent == "rendement":
-        result = service.get_rendement(huilerie, start_date, end_date, user_enterprise_id)
+        query_start_date = start_date if explicit_period else None
+        query_end_date = end_date if explicit_period else None
+        result = service.get_rendement(huilerie, query_start_date, query_end_date, user_enterprise_id)
         rend = result.get("value", 0)
         if rend <= 0:
             response_text = f"Aucune donnée de rendement pour {period_text}.{ctx_note}"
@@ -1003,7 +1063,9 @@ def ask_chatbot(
 
     # --- QUALITE -------------------------------------------------------------
     elif intent == "qualite":
-        result = service.get_qualite(huilerie, start_date, end_date, user_enterprise_id)
+        query_start_date = start_date if explicit_period else None
+        query_end_date = end_date if explicit_period else None
+        result = service.get_qualite(huilerie, query_start_date, query_end_date, user_enterprise_id)
         rows = result.get("value") or []
         summary = result.get("summary", {})
         if not rows:
@@ -1034,7 +1096,9 @@ def ask_chatbot(
 
     # --- MEILLEUR FOURNISSEUR ------------------------------------------------
     elif intent == "fournisseur":
-        result = service.get_meilleur_fournisseur(huilerie, start_date, end_date, user_enterprise_id)
+        query_start_date = start_date if explicit_period else None
+        query_end_date = end_date if explicit_period else None
+        result = service.get_meilleur_fournisseur(huilerie, query_start_date, query_end_date, user_enterprise_id)
         rows = result.get("value") or []
         if not rows:
             response_text = f"Aucune donnée fournisseur disponible pour {period_text}.{ctx_note}"
@@ -1081,9 +1145,11 @@ def ask_chatbot(
 
     # --- LISTE LOTS ----------------------------------------------------------
     elif intent == "lot_liste":
+        query_start_date = start_date if explicit_period else None
+        query_end_date = end_date if explicit_period else None
         non_conf = any(kw in payload.message.lower() for kw in ["non conforme", "lampante", "mauvaise"])
         result = service.get_lot_liste(
-            huilerie, start_date, end_date, user_enterprise_id,
+            huilerie, query_start_date, query_end_date, user_enterprise_id,
             variete=entities.get("variete"),
             non_conformes_only=non_conf,
         )

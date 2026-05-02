@@ -38,8 +38,40 @@ Structure JSON attendue :
 
 Huileries connues : zitouneya, Moulin Sfax, Moulin Sousse, Moulin Artisanal.
 
-Regles de detection d'intention :
-- stock / inventaire / olives disponibles / reserve / quantite disponible    -> "stock"
+================================================================================
+REGLES CRITIQUES — À RESPECTER ABSOLUMENT :
+================================================================================
+
+PRIORITE 1 - STOCK (JAMAIS confondre avec fournisseur ou lot_liste) :
+- Si le message contient : "stock" / "stock actuel" / "inventaire" / "quantite disponible" / "reserve"
+  ET N'EXISTE PAS : "liste", "lots", "tracabilite" / "qui livre"
+  → TOUJOURS "stock"
+  Exemples :
+    "stock zitouneya" → "stock"
+    "stock actuel" → "stock"
+    "reserve d'olive" → "stock"
+    "stock avec lots" → "lot_liste" (contains "lots")
+
+PRIORITE 2 - LOT_LISTE (quand on demande la LISTE des lots) :
+- Si le message contient : "liste des lots" / "liste lot" / "tous les lots" / "lots recus" / "lots non conformes"
+  → TOUJOURS "lot_liste"
+  Exemples :
+    "liste des lots zitouneya" → "lot_liste"
+    "tous les lots recus" → "lot_liste"
+
+PRIORITE 3 - FOURNISSEUR (SEULEMENT si parle explicitement de fournisseurs) :
+- Si le message contient : "meilleur fournisseur" / "classement fournisseur" / "top fournisseur"
+  / "qui livre" / "qui livre mieux" / "performance fournisseur" / "fournisseur le plus"
+  ET EXISTE "stock" SEUL (pas "liste lot" ou "lots")
+  → "fournisseur"
+  Sinon si "stock" est present → TOUJOURS "stock"
+  Exemples :
+    "meilleur fournisseur" → "fournisseur"
+    "qui livre les meilleures olives" → "fournisseur"
+    "stock du meilleur fournisseur" → "stock" (car le keyword primaire est "stock")
+
+Regles de detection d'intention (ordre respecte) :
+- stock / inventaire / olives disponibles / reserve / quantite disponible    -> "stock" (SAUF si "lots"/"liste" present)
 - production / huile produite / litres produits / fabrication / extraction   -> "production"
 - machine / panne / maintenance / equipement / broyeur / etat machine        -> "machine"
 - quelles machines utilisees / machine la plus utilisee / frequence machine
@@ -52,6 +84,7 @@ Regles de detection d'intention :
 - campagne / saison / annee de campagne                                      -> "campagne"
 - meilleur fournisseur / classement fournisseur / top fournisseur
   / qui livre mieux / qualite fournisseur / fournisseur le plus performant   -> "fournisseur"
+  (SEULEMENT si "stock" seul n'est pas le keyword primaire)
 - cycle de vie lot / historique lot / parcours lot / trajet lot
   / suivi lot / etapes du lot / que s'est-il passe pour le lot               -> "lot_cycle_vie"
 - liste des lots / lots non conformes / tracabilite lots / tous les lots
@@ -163,34 +196,77 @@ def _repli_regles(message: str) -> dict:
     texte = message.lower().strip()
     intention = "inconnu"
 
-    if any(m in texte for m in ["meilleur fournisseur", "classement fournisseur", "top fournisseur", "fournisseur"]):
+    # ── Intents spécifiques EN PREMIER (avant stock/production génériques) ──
+
+    if any(m in texte for m in [
+        "meilleur fournisseur", "classement fournisseur", "top fournisseur",
+        "fournisseur le plus", "qui livre", "performance fournisseur"
+    ]):
         intention = "fournisseur"
-    elif any(m in texte for m in ["cycle de vie", "historique lot", "parcours lot", "suivi lot", "etapes lot"]):
+
+    elif any(m in texte for m in [
+        "cycle de vie", "historique lot", "parcours lot",
+        "suivi lot", "etapes lot", "cycle lot"
+    ]):
         intention = "lot_cycle_vie"
-    elif any(m in texte for m in ["machines utilisees", "machine la plus utilisee", "usage machine", "frequence machine"]):
+
+    elif any(m in texte for m in [
+        "machines utilisees", "machine la plus utilisee",
+        "usage machine", "frequence machine", "machines les plus"
+    ]):
         intention = "machines_utilisees"
-    elif any(m in texte for m in ["liste lot", "lots non conformes", "tracabilite", "tous les lots"]):
+
+    elif any(m in texte for m in [
+        "liste lot", "liste des lots", "lots non conformes",
+        "tracabilite", "tous les lots", "lots de", "lots recus",
+        "lots zitouneya", "lots huilerie", "lots moulin",
+    ]):
         intention = "lot_liste"
-    elif any(m in texte for m in ["analyse labo", "resultat labo", "k270", "k232", "polyphenol", "indice peroxyde"]):
+
+    elif any(m in texte for m in [
+        "analyse labo", "resultat labo", "k270", "k232",
+        "polyphenol", "indice peroxyde", "analyses laboratoire"
+    ]):
         intention = "analyse_labo"
-    elif any(m in texte for m in ["mouvement stock", "transfert stock", "entree stock", "sortie stock"]):
+
+    elif any(m in texte for m in [
+        "mouvement stock", "transfert stock",
+        "entree stock", "sortie stock", "historique stock"
+    ]):
         intention = "mouvement_stock"
-    elif any(m in texte for m in ["stock", "inventaire", "olive", "reserve", "quantite disponible"]):
+
+    # ── STOCK : mot "stock" SEUL ou avec huilerie, SANS "lot" dans la phrase ──
+    elif (
+        any(m in texte for m in ["stock", "inventaire", "quantite disponible", "reserve"])
+        and not any(m in texte for m in ["liste lot", "lots", "tracabilite"])
+    ):
         intention = "stock"
-    elif any(m in texte for m in ["production", "huile", "litre", "produit", "fabrique"]):
+
+    elif any(m in texte for m in [
+        "production", "huile produite", "litres produits", "fabrication"
+    ]):
         intention = "production"
-    elif any(m in texte for m in ["machine", "panne", "maintenance"]):
+
+    elif any(m in texte for m in ["machine", "panne", "maintenance", "equipement"]):
         intention = "machine"
-    elif any(m in texte for m in ["rendement", "performance", "taux"]):
+
+    elif any(m in texte for m in ["rendement", "performance", "taux extraction"]):
         intention = "rendement"
-    elif any(m in texte for m in ["qualite", "acidite", "peroxyde"]):
+
+    elif any(m in texte for m in [
+        "qualite", "acidite", "peroxyde", "grade huile"
+    ]):
         intention = "qualite"
-    elif any(m in texte for m in ["pourquoi", "diagnostic", "cause"]):
+
+    elif any(m in texte for m in ["pourquoi", "diagnostic", "cause", "probleme qualite"]):
         intention = "diagnostic"
-    elif any(m in texte for m in ["prediction", "prevision", "estimation"]):
+
+    elif any(m in texte for m in ["prediction", "prevision", "estimation future"]):
         intention = "prediction"
-    elif any(m in texte for m in ["reception", "arrivage", "pesee"]):
+
+    elif any(m in texte for m in ["reception", "arrivage", "pesee", "livraison"]):
         intention = "reception"
+
     elif any(m in texte for m in ["campagne", "saison"]):
         intention = "campagne"
 
