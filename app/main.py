@@ -1,10 +1,6 @@
-from pathlib import Path
-
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from app.controllers.chat_controller import router as chat_router
 
 load_dotenv()
@@ -21,13 +17,9 @@ app.add_middleware(
 
 app.include_router(chat_router)
 
-static_dir = Path(__file__).resolve().parent / "static"
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-
 @app.get("/")
 def index():
-    return FileResponse(static_dir / "index.html")
+    return {"status": "ok", "message": "Chatbot Huilerie - interface static disabled"}
 
 
 @app.get("/health")
