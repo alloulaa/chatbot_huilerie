@@ -4,6 +4,7 @@ Remplace le gros chat_controller.py avec une architecture propre.
 """
 import logging
 import unicodedata
+from typing import Any
 from app.nlp.factory import NLPFactory
 from app.nlp.base import NLPAnalyzer
 from app.domain.chat import ChatQuery, IntentResult
@@ -58,7 +59,7 @@ class ChatService:
             Intent.ANALYSE_LABO: AnalyseLaboHandler(self.chatbot_service),
             Intent.PRODUCTION: ProductionHandler(self.chatbot_service),
             Intent.RENDEMENT: RendementHandler(self.chatbot_service),
-            Intent.PREDICTION: PredictionHandler(self.chatbot_service),
+            Intent.PREDICTION: PredictionHandler(),
             Intent.QUALITE: QualiteHandler(self.chatbot_service),
             Intent.DIAGNOSTIC: DiagnosticHandler(self.chatbot_service),
             Intent.CAMPAGNE: CampagneHandler(self.chatbot_service),
@@ -74,6 +75,8 @@ class ChatService:
         enterprise_id: int | None = None,
         permissions: list[str] | None = None,
         user_is_admin: bool = False,
+        extra_context: dict[str, Any] | None = None,
+        auth_available: bool = True,
     ) -> dict:
         """
         Traiter un message de chat complet.
@@ -95,7 +98,7 @@ class ChatService:
         
         # Step 3: RBAC Check
         from app.services.permission_service import is_intent_allowed
-        if not user_is_admin and not is_intent_allowed(intent.value, permissions):
+        if auth_available and not user_is_admin and not is_intent_allowed(intent.value, permissions):
             logger.warning(f"Permission denied for intent: {intent}")
             return {
                 "intent": intent.value,
@@ -125,6 +128,7 @@ class ChatService:
             explicit_period=explicit_period,
             start_date=start_date,
             end_date=end_date,
+            extra_context=extra_context or {},
         )
         
         # Step 7: Dispatch to Handler

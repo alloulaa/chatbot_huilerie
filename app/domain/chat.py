@@ -21,6 +21,7 @@ class ChatQuery:
     explicit_period: bool = False
     start_date: str | None = None
     end_date: str | None = None
+    extra_context: dict[str, Any] = field(default_factory=dict)
     
     @classmethod
     def from_raw(cls, message: str, session_id: str, intent: Intent, **kwargs) -> "ChatQuery":
@@ -37,6 +38,7 @@ class ChatQuery:
             explicit_period=kwargs.get("explicit_period", False),
             start_date=kwargs.get("start_date"),
             end_date=kwargs.get("end_date"),
+            extra_context=kwargs.get("extra_context", {}),
         )
 
 

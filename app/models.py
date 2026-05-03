@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     session_id: str = "demo-session"
     jwt_token: str | None = None
     token: str | None = None
+    prediction_payload: dict | None = None
 
 
 class ChatResponse(BaseModel):

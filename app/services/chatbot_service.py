@@ -18,24 +18,48 @@ class ChatbotService:
             return default
 
     def get_prediction_from_model(self, data: dict[str, Any]):
+        # Placeholder for future ML API integration.
         pass
 
     @staticmethod
     def _normalize_quality_label(value: Any) -> str:
         text = (str(value).strip().lower() if value is not None else "")
-        if text in {"bonne", "bon", "bonne qualite", "bonne qualité", "excellente", "excellent", "extra", "top", "a"}:
+
+        if text in {
+            "bonne",
+            "bon",
+            "bonne qualite",
+            "bonne qualité",
+            "excellente",
+            "excellent",
+            "extra",
+            "top",
+            "a",
+        }:
             return "Bonne"
-        if text in {"moyenne", "moyen", "acceptable", "standard", "b"}:
+
+        if text in {
+            "moyenne",
+            "moyen",
+            "acceptable",
+            "standard",
+            "b",
+        }:
             return "Moyenne"
-        if text in {"mauvaise", "mauvais", "faible", "mediocre", "médiocre", "non conforme", "c"}:
+
+        if text in {
+            "mauvaise",
+            "mauvais",
+            "faible",
+            "mediocre",
+            "médiocre",
+            "non conforme",
+            "c",
+        }:
             return "Mauvaise"
+
         return "Inconnue"
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # STOCK  — lit la table `stock` via stock → lot_olives → huilerie
-    # La table stock n'a PAS de huilerie_id direct (entité Java : seul lot_id)
-    # Pas de filtre date : le stock est un état courant, pas une série temporelle
-    # ─────────────────────────────────────────────────────────────────────────
     def get_stock(
         self,
         huilerie: str | None = None,
@@ -44,31 +68,23 @@ class ChatbotService:
         enterprise_id: int | None = None,
     ) -> dict[str, Any]:
         query = """
-            SELECT
-                s.id_stock,
-                s.reference          AS reference_stock,
-                s.variete            AS variete,
-                s.quantite_disponible AS quantite_disponible,
-                s.type_stock         AS type_stock,
-                lo.reference         AS lot_reference,
-                h.nom                AS huilerie_nom
+            SELECT s.variete, SUM(s.quantite_disponible) AS total_stock
             FROM stock s
-            JOIN lot_olives lo ON lo.id_lot = s.lot_id
-            JOIN huilerie h   ON h.id_huilerie = lo.huilerie_id
+            LEFT JOIN lot_olives lo ON lo.id_lot = s.lot_id
+            LEFT JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
             WHERE 1=1
         """
         params: list[Any] = []
-
         if enterprise_id is not None:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
-
         if huilerie:
             query += " AND LOWER(h.nom) = LOWER(%s)"
             params.append(huilerie)
-
-        # Pas de filtre date — stock = état courant
-        query += " ORDER BY s.variete ASC, s.reference ASC"
+        if start_date and end_date:
+            query += " AND lo.date_reception BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+        query += " GROUP BY s.variete ORDER BY s.variete"
 
         connection = None
         cursor = None
@@ -80,22 +96,14 @@ class ChatbotService:
 
             normalized = []
             for row in rows:
-                qte = self._to_float(row.get("quantite_disponible"), 0.0)
-                normalized.append({
-                    "reference_stock":     row.get("reference_stock") or "N/D",
-                    "variete":             row.get("variete") or "Inconnue",
-                    "quantite_disponible": qte,
-                    "type_stock":          row.get("type_stock") or "Olive",
-                    "lot_reference":       row.get("lot_reference") or "",
-                    "huilerie_nom":        row.get("huilerie_nom") or "",
-                    # alias pour compatibilité
-                    "total_stock":         qte,
-                    # champ 'name' requis par normalizeStockData() côté Angular
-                    "name":                row.get("reference_stock") or "N/D",
-                })
+                normalized.append(
+                    {
+                        "variete": row.get("variete") or "Inconnue",
+                        "total_stock": self._to_float(row.get("total_stock"), 0.0),
+                    }
+                )
 
             return {"value": normalized}
-
         except Exception as exc:
             logger.exception("Error while reading stock: %s", exc)
             return {"value": []}
@@ -156,6 +164,8 @@ class ChatbotService:
         end_date: str | None = None,
         enterprise_id: int | None = None,
     ) -> dict[str, Any]:
+        # Query for machines that need attention (maintenance, surveillance, panne, etc.)
+        # Status filter is applied without date constraints to catch all problematic machines
         query = """
             SELECT DISTINCT m.nom_machine, m.etat_machine, m.reference, m.capacite
             FROM machine m
@@ -181,14 +191,21 @@ class ChatbotService:
 
             normalized = []
             for row in rows:
+                # support both snake_case and camelCase DB column names
                 machine_name = (
-                    row.get("nom_machine") or row.get("nomMachine")
-                    or row.get("machine") or "Machine inconnue"
+                    row.get("nom_machine")
+                    or row.get("nomMachine")
+                    or row.get("machine")
+                    or "Machine inconnue"
                 )
                 machine_state = (
-                    row.get("etat_machine") or row.get("etatMachine")
-                    or row.get("probleme") or row.get("etat") or "INCONNU"
+                    row.get("etat_machine")
+                    or row.get("etatMachine")
+                    or row.get("probleme")
+                    or row.get("etat")
+                    or "INCONNU"
                 )
+                # normalize to camelCase keys to match Java entity: nomMachine, etatMachine
                 normalized.append({"nomMachine": machine_name, "etatMachine": machine_state})
 
             return {"value": normalized}
@@ -243,18 +260,21 @@ class ChatbotService:
 
             normalized = []
             for row in rows:
+                # accept multiple possible column namings and output camelCase
                 nom = row.get("nom_machine") or row.get("nomMachine") or row.get("nom") or "Machine inconnue"
                 machine_ref = row.get("machine_ref") or row.get("machineRef") or row.get("reference") or "N/D"
                 nb_exec = int(row.get("nb_executions") or row.get("nbExecutions") or 0)
                 rend_moy = self._to_float(row.get("rendement_moyen") or row.get("rendementMoyen"), 0.0)
                 total_prod = self._to_float(row.get("total_produit") or row.get("totalProduit"), 0.0)
-                normalized.append({
-                    "nomMachine": nom,
-                    "machineRef": machine_ref,
-                    "nbExecutions": nb_exec,
-                    "rendementMoyen": rend_moy,
-                    "totalProduit": total_prod,
-                })
+                normalized.append(
+                    {
+                        "nomMachine": nom,
+                        "machineRef": machine_ref,
+                        "nbExecutions": nb_exec,
+                        "rendementMoyen": rend_moy,
+                        "totalProduit": total_prod,
+                    }
+                )
 
             return {"value": normalized}
         except Exception as exc:
@@ -344,8 +364,10 @@ class ChatbotService:
             cursor = connection.cursor(dictionary=True)
             cursor.execute(query, tuple(params))
             row = cursor.fetchone()
+
             rendement_predit = self._to_float(row.get("rendement_predit") if row else None, 0.0)
             quantite_estimee = self._to_float(row.get("quantite_estimee") if row else None, 0.0)
+
             return {"rendement_predit": rendement_predit, "quantite_estimee": quantite_estimee}
         except Exception as exc:
             logger.exception("Error while reading prediction: %s", exc)
@@ -392,22 +414,36 @@ class ChatbotService:
             rows = cursor.fetchall() or []
 
             normalized = []
-            summary = {"Bonne": 0, "Moyenne": 0, "Mauvaise": 0, "Inconnue": 0}
+            summary = {
+                "Bonne": 0,
+                "Moyenne": 0,
+                "Mauvaise": 0,
+                "Inconnue": 0,
+            }
 
             for row in rows:
                 total = int(row.get("total") or 0)
                 qualite_normalisee = self._normalize_quality_label(row.get("qualite"))
                 summary[qualite_normalisee] = summary.get(qualite_normalisee, 0) + total
-                normalized.append({
-                    "qualite": row.get("qualite"),
-                    "qualite_normalisee": qualite_normalisee,
-                    "total": total,
-                })
 
-            return {"value": normalized, "summary": summary}
+                normalized.append(
+                    {
+                        "qualite": row.get("qualite"),
+                        "qualite_normalisee": qualite_normalisee,
+                        "total": total,
+                    }
+                )
+
+            return {
+                "value": normalized,
+                "summary": summary,
+            }
         except Exception as exc:
             logger.exception("Error while reading quality distribution: %s", exc)
-            return {"value": [], "summary": {"Bonne": 0, "Moyenne": 0, "Mauvaise": 0, "Inconnue": 0}}
+            return {
+                "value": [],
+                "summary": {"Bonne": 0, "Moyenne": 0, "Mauvaise": 0, "Inconnue": 0},
+            }
         finally:
             if cursor is not None:
                 cursor.close()
@@ -452,6 +488,7 @@ class ChatbotService:
                 acidite = self._to_float(row.get("acidite_huile_pourcent"), 0.0)
                 peroxyde = self._to_float(row.get("indice_peroxyde_meq_o2_kg"), 0.0)
                 k270 = self._to_float(row.get("k270"), 0.0)
+
                 if acidite > 0.8:
                     issues.append("acidite elevee")
                 if peroxyde > 20:
@@ -459,7 +496,9 @@ class ChatbotService:
                 if k270 > 0.22:
                     issues.append("k270 eleve")
 
-            return {"issues": list(dict.fromkeys(issues)), "rows": rows}
+            # Preserve order while removing duplicates.
+            unique_issues = list(dict.fromkeys(issues))
+            return {"issues": unique_issues, "rows": rows}
         except Exception as exc:
             logger.exception("Error while running quality diagnostic: %s", exc)
             return {"issues": [], "rows": []}
@@ -473,17 +512,23 @@ class ChatbotService:
     def _normalize_lot_reference(value: Any) -> str | None:
         if value is None:
             return None
+
         import re
+
         text = str(value).strip().upper()
         if not text:
             return None
+
         if re.fullmatch(r"LO\d+", text):
             return f"LO{int(text[2:]):02d}"
+
         match = re.fullmatch(r"(?:LOT|L)\s*(\d+)", text)
         if match:
             return f"LO{int(match.group(1)):02d}"
+
         if re.fullmatch(r"\d+", text):
             return f"LO{int(text):02d}"
+
         return text
 
     def get_meilleur_fournisseur(
@@ -527,14 +572,16 @@ class ChatbotService:
 
             normalized = []
             for index, row in enumerate(rows, start=1):
-                normalized.append({
-                    "rang": index,
-                    "fournisseur_nom": row.get("fournisseur_nom") or "Inconnu",
-                    "nb_lots": int(row.get("nb_lots") or 0),
-                    "quantite_totale_kg": self._to_float(row.get("quantite_totale_kg"), 0.0),
-                    "rendement_moyen": self._to_float(row.get("rendement_moyen"), 0.0),
-                    "acidite_moyenne": self._to_float(row.get("acidite_moyenne"), 0.0),
-                })
+                normalized.append(
+                    {
+                        "rang": index,
+                        "fournisseur_nom": row.get("fournisseur_nom") or "Inconnu",
+                        "nb_lots": int(row.get("nb_lots") or 0),
+                        "quantite_totale_kg": self._to_float(row.get("quantite_totale_kg"), 0.0),
+                        "rendement_moyen": self._to_float(row.get("rendement_moyen"), 0.0),
+                        "acidite_moyenne": self._to_float(row.get("acidite_moyenne"), 0.0),
+                    }
+                )
 
             return {"value": normalized}
         except Exception as exc:
@@ -557,23 +604,48 @@ class ChatbotService:
 
         query_lot = """
             SELECT
-                lo.id_lot, lo.reference, lo.variete, lo.fournisseur_nom,
-                lo.quantite_initiale, lo.quantite_restante,
-                lo.date_reception, lo.date_recolte, lo.campagne_id,
+                lo.id_lot,
+                lo.reference,
+                lo.variete,
+                lo.fournisseur_nom,
+                lo.quantite_initiale,
+                lo.quantite_restante,
+                lo.date_reception,
+                lo.date_recolte,
+                lo.campagne_id,
                 h.nom AS huilerie_nom
             FROM lot_olives lo
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
-            WHERE (LOWER(lo.reference) = LOWER(%s) OR CAST(lo.id_lot AS CHAR) = %s)
+            WHERE (LOWER(lo.reference) = LOWER(%s)
+               OR CAST(lo.id_lot AS CHAR) = %s)
         """
+        
         params_lot: list[Any] = [normalized_ref, normalized_ref]
         if enterprise_id is not None:
             query_lot += " AND h.entreprise_id = %s"
             params_lot.append(enterprise_id)
         query_lot += " LIMIT 1"
 
-        query_exec    = "SELECT reference, date_debut, date_fin_reelle, statut, rendement FROM execution_production WHERE lot_olives_id = %s ORDER BY date_debut ASC, id_execution_production ASC"
-        query_analyse = "SELECT reference, date_analyse, acidite_huile_pourcent, indice_peroxyde_meq_o2_kg, k270 FROM analyse_laboratoire WHERE lot_id = %s ORDER BY date_analyse ASC, id_analyse ASC"
-        query_stock   = "SELECT sm.reference, sm.date_mouvement, sm.type_mouvement, sm.commentaire FROM stock_movement sm WHERE sm.lot_id = %s ORDER BY sm.date_mouvement ASC, sm.id_stock_movement ASC"
+        query_exec = """
+            SELECT reference, date_debut, date_fin_reelle, statut, rendement
+            FROM execution_production
+            WHERE lot_olives_id = %s
+            ORDER BY date_debut ASC, id_execution_production ASC
+        """
+
+        query_analyse = """
+            SELECT reference, date_analyse, acidite_huile_pourcent, indice_peroxyde_meq_o2_kg, k270
+            FROM analyse_laboratoire
+            WHERE lot_id = %s
+            ORDER BY date_analyse ASC, id_analyse ASC
+        """
+
+        query_stock = """
+            SELECT sm.reference, sm.date_mouvement, sm.type_mouvement, sm.commentaire
+            FROM stock_movement sm
+            WHERE sm.lot_id = %s
+            ORDER BY sm.date_mouvement ASC, sm.id_stock_movement ASC
+        """
 
         connection = None
         cursor = None
@@ -601,19 +673,54 @@ class ChatbotService:
 
             steps: list[dict[str, Any]] = []
             if lot_info.get("date_reception"):
-                steps.append({"etape": "reception", "date": lot_info["date_reception"], "details": f"Réception du lot {lot_info.get('reference')} par {lot_info.get('fournisseur_nom') or 'fournisseur inconnu'}"})
+                steps.append(
+                    {
+                        "etape": "reception",
+                        "date": lot_info["date_reception"],
+                        "details": f"Réception du lot {lot_info.get('reference')} par {lot_info.get('fournisseur_nom') or 'fournisseur inconnu'}",
+                    }
+                )
 
             cursor.execute(query_exec, (lot_id,))
-            for row in cursor.fetchall() or []:
-                steps.append({"etape": "production", "date": row.get("date_debut"), "details": f"Exécution {row.get('reference')} - statut {row.get('statut')}", "rendement": self._to_float(row.get("rendement"), 0.0), "reference": row.get("reference")})
+            exec_rows = cursor.fetchall() or []
+            for row in exec_rows:
+                steps.append(
+                    {
+                        "etape": "production",
+                        "date": row.get("date_debut"),
+                        "details": f"Exécution {row.get('reference')} - statut {row.get('statut')}",
+                        "rendement": self._to_float(row.get("rendement"), 0.0),
+                        "reference": row.get("reference"),
+                    }
+                )
 
             cursor.execute(query_analyse, (lot_id,))
-            for row in cursor.fetchall() or []:
-                steps.append({"etape": "analyse_labo", "date": row.get("date_analyse"), "details": f"Analyse {row.get('reference') or ''}".strip(), "acidite_huile_pourcent": self._to_float(row.get("acidite_huile_pourcent"), 0.0), "indice_peroxyde_meq_o2_kg": self._to_float(row.get("indice_peroxyde_meq_o2_kg"), 0.0), "k270": self._to_float(row.get("k270"), 0.0), "reference": row.get("reference")})
+            analyse_rows = cursor.fetchall() or []
+            for row in analyse_rows:
+                steps.append(
+                    {
+                        "etape": "analyse_labo",
+                        "date": row.get("date_analyse"),
+                        "details": f"Analyse {row.get('reference') or ''}".strip(),
+                        "acidite_huile_pourcent": self._to_float(row.get("acidite_huile_pourcent"), 0.0),
+                        "indice_peroxyde_meq_o2_kg": self._to_float(row.get("indice_peroxyde_meq_o2_kg"), 0.0),
+                        "k270": self._to_float(row.get("k270"), 0.0),
+                        "reference": row.get("reference"),
+                    }
+                )
 
             cursor.execute(query_stock, (lot_id,))
-            for row in cursor.fetchall() or []:
-                steps.append({"etape": "stock", "date": row.get("date_mouvement"), "details": row.get("commentaire") or row.get("type_mouvement"), "type_mouvement": row.get("type_mouvement"), "reference": row.get("reference")})
+            stock_rows = cursor.fetchall() or []
+            for row in stock_rows:
+                steps.append(
+                    {
+                        "etape": "stock",
+                        "date": row.get("date_mouvement"),
+                        "details": row.get("commentaire") or row.get("type_mouvement"),
+                        "type_mouvement": row.get("type_mouvement"),
+                        "reference": row.get("reference"),
+                    }
+                )
 
             return {"lot": lot_info, "steps": steps}
         except Exception as exc:
@@ -636,8 +743,13 @@ class ChatbotService:
     ) -> dict[str, Any]:
         query = """
             SELECT
-                lo.id_lot, lo.reference, lo.variete, lo.fournisseur_nom,
-                lo.quantite_initiale, lo.quantite_restante, lo.date_reception,
+                lo.id_lot,
+                lo.reference,
+                lo.variete,
+                lo.fournisseur_nom,
+                lo.quantite_initiale,
+                lo.quantite_restante,
+                lo.date_reception,
                 MAX(pf.qualite) AS qualite_brute,
                 MAX(al.acidite_huile_pourcent) AS acidite_max,
                 MAX(al.indice_peroxyde_meq_o2_kg) AS peroxyde_max,
@@ -675,25 +787,29 @@ class ChatbotService:
             normalized = []
             for row in rows:
                 qualite_brute = row.get("qualite_brute")
-                acidite_max   = self._to_float(row.get("acidite_max"), 0.0)
-                peroxyde_max  = self._to_float(row.get("peroxyde_max"), 0.0)
+                acidite_max = self._to_float(row.get("acidite_max"), 0.0)
+                peroxyde_max = self._to_float(row.get("peroxyde_max"), 0.0)
                 qualite_huile = self._normalize_quality_label(qualite_brute)
                 if qualite_huile == "Inconnue" and (acidite_max > 0.8 or peroxyde_max > 20):
                     qualite_huile = "Mauvaise"
+
                 if non_conformes_only and qualite_huile not in {"Mauvaise", "Inconnue"}:
                     if acidite_max <= 0.8 and peroxyde_max <= 20:
                         continue
-                normalized.append({
-                    "id_lot": row.get("id_lot"),
-                    "reference": row.get("reference"),
-                    "variete": row.get("variete") or "Inconnue",
-                    "fournisseur_nom": row.get("fournisseur_nom") or "Inconnu",
-                    "quantite_initiale": self._to_float(row.get("quantite_initiale"), 0.0),
-                    "quantite_restante": self._to_float(row.get("quantite_restante"), 0.0),
-                    "date_reception": row.get("date_reception"),
-                    "qualite_huile": qualite_huile,
-                    "huilerie_nom": row.get("huilerie_nom"),
-                })
+
+                normalized.append(
+                    {
+                        "id_lot": row.get("id_lot"),
+                        "reference": row.get("reference"),
+                        "variete": row.get("variete") or "Inconnue",
+                        "fournisseur_nom": row.get("fournisseur_nom") or "Inconnu",
+                        "quantite_initiale": self._to_float(row.get("quantite_initiale"), 0.0),
+                        "quantite_restante": self._to_float(row.get("quantite_restante"), 0.0),
+                        "date_reception": row.get("date_reception"),
+                        "qualite_huile": qualite_huile,
+                        "huilerie_nom": row.get("huilerie_nom"),
+                    }
+                )
 
             return {"value": normalized}
         except Exception as exc:
@@ -713,7 +829,10 @@ class ChatbotService:
     ) -> dict[str, Any]:
         query = """
             SELECT
-                c.reference, c.annee, c.date_debut, c.date_fin,
+                c.reference,
+                c.annee,
+                c.date_debut,
+                c.date_fin,
                 h.nom AS huilerie_nom,
                 COUNT(l.id_lot) AS nb_lots,
                 COALESCE(SUM(l.quantite_initiale), 0) AS total_olives_kg
@@ -743,17 +862,21 @@ class ChatbotService:
             cursor = connection.cursor(dictionary=True)
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
+
             normalized = []
             for row in rows:
-                normalized.append({
-                    "reference": row.get("reference"),
-                    "annee": row.get("annee"),
-                    "date_debut": row.get("date_debut"),
-                    "date_fin": row.get("date_fin"),
-                    "huilerie_nom": row.get("huilerie_nom"),
-                    "nb_lots": int(row.get("nb_lots") or 0),
-                    "total_olives_kg": self._to_float(row.get("total_olives_kg"), 0.0),
-                })
+                normalized.append(
+                    {
+                        "reference": row.get("reference"),
+                        "annee": row.get("annee"),
+                        "date_debut": row.get("date_debut"),
+                        "date_fin": row.get("date_fin"),
+                        "huilerie_nom": row.get("huilerie_nom"),
+                        "nb_lots": int(row.get("nb_lots") or 0),
+                        "total_olives_kg": self._to_float(row.get("total_olives_kg"), 0.0),
+                    }
+                )
+
             return {"value": normalized}
         except Exception as exc:
             logger.exception("Error while reading campaigns: %s", exc)
@@ -774,10 +897,15 @@ class ChatbotService:
     ) -> dict[str, Any]:
         query = """
             SELECT
-                al.reference, al.date_analyse,
-                al.acidite_huile_pourcent, al.indice_peroxyde_meq_o2_kg,
-                al.k232, al.k270, al.polyphenols_mg_kg,
-                lo.reference AS lot_ref, lo.variete,
+                al.reference,
+                al.date_analyse,
+                al.acidite_huile_pourcent,
+                al.indice_peroxyde_meq_o2_kg,
+                al.k232,
+                al.k270,
+                al.polyphenols_mg_kg,
+                lo.reference AS lot_ref,
+                lo.variete,
                 h.nom AS huilerie_nom
             FROM analyse_laboratoire al
             JOIN lot_olives lo ON lo.id_lot = al.lot_id
@@ -808,20 +936,24 @@ class ChatbotService:
             cursor = connection.cursor(dictionary=True)
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
+
             normalized = []
             for row in rows:
-                normalized.append({
-                    "reference": row.get("reference"),
-                    "lot_ref": row.get("lot_ref"),
-                    "date_analyse": row.get("date_analyse"),
-                    "acidite_huile_pourcent": self._to_float(row.get("acidite_huile_pourcent"), 0.0),
-                    "indice_peroxyde_meq_o2_kg": self._to_float(row.get("indice_peroxyde_meq_o2_kg"), 0.0),
-                    "k232": self._to_float(row.get("k232"), 0.0),
-                    "k270": self._to_float(row.get("k270"), 0.0),
-                    "polyphenols_mg_kg": self._to_float(row.get("polyphenols_mg_kg"), 0.0),
-                    "variete": row.get("variete"),
-                    "huilerie_nom": row.get("huilerie_nom"),
-                })
+                normalized.append(
+                    {
+                        "reference": row.get("reference"),
+                        "lot_ref": row.get("lot_ref"),
+                        "date_analyse": row.get("date_analyse"),
+                        "acidite_huile_pourcent": self._to_float(row.get("acidite_huile_pourcent"), 0.0),
+                        "indice_peroxyde_meq_o2_kg": self._to_float(row.get("indice_peroxyde_meq_o2_kg"), 0.0),
+                        "k232": self._to_float(row.get("k232"), 0.0),
+                        "k270": self._to_float(row.get("k270"), 0.0),
+                        "polyphenols_mg_kg": self._to_float(row.get("polyphenols_mg_kg"), 0.0),
+                        "variete": row.get("variete"),
+                        "huilerie_nom": row.get("huilerie_nom"),
+                    }
+                )
+
             return {"value": normalized}
         except Exception as exc:
             logger.exception("Error while reading laboratory analysis: %s", exc)
@@ -841,8 +973,12 @@ class ChatbotService:
     ) -> dict[str, Any]:
         query = """
             SELECT
-                sm.reference, sm.date_mouvement, sm.type_mouvement, sm.commentaire,
-                lo.reference AS lot_ref, lo.variete,
+                sm.reference,
+                sm.date_mouvement,
+                sm.type_mouvement,
+                sm.commentaire,
+                lo.reference AS lot_ref,
+                lo.variete,
                 s.reference AS stock_reference,
                 h.nom AS huilerie_nom
             FROM stock_movement sm
@@ -870,18 +1006,22 @@ class ChatbotService:
             cursor = connection.cursor(dictionary=True)
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
+
             normalized = []
             for row in rows:
-                normalized.append({
-                    "reference": row.get("reference"),
-                    "date_mouvement": row.get("date_mouvement"),
-                    "type_mouvement": row.get("type_mouvement"),
-                    "commentaire": row.get("commentaire"),
-                    "lot_ref": row.get("lot_ref"),
-                    "variete": row.get("variete"),
-                    "stock_reference": row.get("stock_reference"),
-                    "huilerie_nom": row.get("huilerie_nom"),
-                })
+                normalized.append(
+                    {
+                        "reference": row.get("reference"),
+                        "date_mouvement": row.get("date_mouvement"),
+                        "type_mouvement": row.get("type_mouvement"),
+                        "commentaire": row.get("commentaire"),
+                        "lot_ref": row.get("lot_ref"),
+                        "variete": row.get("variete"),
+                        "stock_reference": row.get("stock_reference"),
+                        "huilerie_nom": row.get("huilerie_nom"),
+                    }
+                )
+
             return {"value": normalized}
         except Exception as exc:
             logger.exception("Error while reading stock movements: %s", exc)
@@ -901,8 +1041,11 @@ class ChatbotService:
     ) -> dict[str, Any]:
         query = """
             SELECT
-                lo.reference, lo.variete, lo.fournisseur_nom,
-                lo.quantite_initiale, lo.date_reception,
+                lo.reference,
+                lo.variete,
+                lo.fournisseur_nom,
+                lo.quantite_initiale,
+                lo.date_reception,
                 h.nom AS huilerie_nom
             FROM lot_olives lo
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
@@ -927,19 +1070,23 @@ class ChatbotService:
             cursor = connection.cursor(dictionary=True)
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
+
             normalized = []
             total = 0.0
             for row in rows:
                 quantite = self._to_float(row.get("quantite_initiale"), 0.0)
                 total += quantite
-                normalized.append({
-                    "reference": row.get("reference"),
-                    "variete": row.get("variete") or "Inconnue",
-                    "fournisseur_nom": row.get("fournisseur_nom") or "Inconnu",
-                    "quantite_initiale": quantite,
-                    "date_reception": row.get("date_reception"),
-                    "huilerie_nom": row.get("huilerie_nom"),
-                })
+                normalized.append(
+                    {
+                        "reference": row.get("reference"),
+                        "variete": row.get("variete") or "Inconnue",
+                        "fournisseur_nom": row.get("fournisseur_nom") or "Inconnu",
+                        "quantite_initiale": quantite,
+                        "date_reception": row.get("date_reception"),
+                        "huilerie_nom": row.get("huilerie_nom"),
+                    }
+                )
+
             return {"value": normalized, "total_kg": total}
         except Exception as exc:
             logger.exception("Error while reading receptions: %s", exc)
