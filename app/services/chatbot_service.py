@@ -329,55 +329,6 @@ class ChatbotService:
             if connection is not None and connection.is_connected():
                 connection.close()
 
-    def get_prediction(
-        self,
-        huilerie: str | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        enterprise_id: int | None = None,
-    ) -> dict[str, Any]:
-        query = """
-            SELECT
-                AVG(p.rendement_predit_pourcent) AS rendement_predit,
-                AVG(p.quantite_huile_recalculee_litres) AS quantite_estimee
-            FROM prediction p
-            JOIN execution_production ep ON ep.id_execution_production = p.execution_production_id
-            JOIN lot_olives lo ON lo.id_lot = ep.lot_olives_id
-            JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
-            WHERE 1=1
-        """
-        params: list[Any] = []
-        if enterprise_id is not None:
-            query += " AND h.entreprise_id = %s"
-            params.append(enterprise_id)
-        if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
-            params.append(huilerie)
-        if start_date and end_date:
-            query += " AND ep.date_debut BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
-
-        connection = None
-        cursor = None
-        try:
-            connection = get_db_connection()
-            cursor = connection.cursor(dictionary=True)
-            cursor.execute(query, tuple(params))
-            row = cursor.fetchone()
-
-            rendement_predit = self._to_float(row.get("rendement_predit") if row else None, 0.0)
-            quantite_estimee = self._to_float(row.get("quantite_estimee") if row else None, 0.0)
-
-            return {"rendement_predit": rendement_predit, "quantite_estimee": quantite_estimee}
-        except Exception as exc:
-            logger.exception("Error while reading prediction: %s", exc)
-            return {"rendement_predit": 0.0, "quantite_estimee": 0.0}
-        finally:
-            if cursor is not None:
-                cursor.close()
-            if connection is not None and connection.is_connected():
-                connection.close()
-
     def get_qualite(
         self,
         huilerie: str | None = None,

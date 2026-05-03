@@ -1,13 +1,17 @@
+import asyncio
 import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header
 
 from app.database import get_db_connection
+from app.domain.chat import ChatQuery
+from app.domain.intent import Intent
 from app.models import ChatRequest, ChatResponse
 from app.nlp.analyseur_llm import analyser_message_sync
 from app.nlp.normalizer import resolve_period
 from app.services.chatbot_service import ChatbotService
+from app.services.intent.prediction import PredictionHandler
 from app.services.permission_service import (
     get_user_enterprise_id,
     get_user_huilerie,
@@ -20,6 +24,7 @@ from app.services.permission_service import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatbotService()
+prediction_handler = PredictionHandler()
 
 SESSION_CONTEXT: dict[str, dict] = {}
 
@@ -92,6 +97,13 @@ def _normalize_choice(message: str) -> str | None:
     if texte in {"graphique", "chart", "diagramme", "courbe", "barre", "bar"}:
         return "graphique"
     return None
+
+
+def _normalize_intent(value: Any) -> str:
+    texte = str(value or "inconnu").strip().lower()
+    if texte.startswith("intent."):
+        texte = texte.split(".", 1)[1]
+    return texte
 
 
 def _huilerie_belongs_to_enterprise(huilerie_name: str | None, enterprise_id: int | None) -> bool:
@@ -845,7 +857,7 @@ def ask_chatbot(
 
     # ── NLP ──────────────────────────────────────────────────────────────────
     resultat = analyser_message_sync(payload.message)
-    intent = str(resultat.get("intention") or "inconnu").strip().lower()
+    intent = _normalize_intent(resultat.get("intention"))
     try:
         confidence = float(resultat.get("confiance", 0.5))
     except (TypeError, ValueError):
@@ -1024,17 +1036,24 @@ def ask_chatbot(
 
     # --- PREDICTION ----------------------------------------------------------
     elif intent == "prediction":
-        result = service.get_prediction(huilerie, start_date, end_date, user_enterprise_id)
-        rend = result.get("rendement_predit", 0)
-        qte  = result.get("quantite_estimee", 0)
-        if rend <= 0 and qte <= 0:
-            response_text = f"Aucune prédiction disponible pour {period_text}.{ctx_note}"
-        else:
-            response_text = (
-                f"Prédiction {scope_text} : rendement prédit **{_fmt(rend, 1)} %**, "
-                f"production estimée **{_fmt(qte)} litres**.{ctx_note}"
-            )
-        response_data = result
+        prediction_payload = payload.prediction_payload or {}
+        query = ChatQuery.from_raw(
+            message=payload.message,
+            session_id=payload.session_id,
+            intent=Intent.PREDICTION,
+            confidence=confidence,
+            huilerie=huilerie,
+            enterprise_id=user_enterprise_id,
+            permissions=applied_perms or [],
+            period_label=period_label,
+            explicit_period=explicit_period is not None,
+            start_date=start_date,
+            end_date=end_date,
+            extra_context={"prediction_payload": prediction_payload},
+        )
+        result = asyncio.run(prediction_handler.handle(query))
+        response_text = result.text
+        response_data = result.data
 
     # --- QUALITE -------------------------------------------------------------
     elif intent == "qualite":
