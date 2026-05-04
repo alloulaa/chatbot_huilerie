@@ -24,6 +24,28 @@ class RegexAnalyzer(NLPAnalyzer):
         texte = message.lower().strip()
         intention = Intent.INCONNU
         
+        # --- EXPLICATION (avant diagnostic et lot_cycle_vie) ---
+        # Doit avoir un mot causal/explicatif ET une référence de lot
+        has_lot_ref = bool(re.search(r"\blo\s*\d+\b|\blot\s*\d+\b", texte))
+        has_causal = any(m in texte for m in [
+            "pourquoi", "explique", "expliquer", "cause", "raison",
+            "qu'est-ce qui", "qu est-ce qui", "analyser", "analyse le lot",
+            "comment expliquer",
+        ])
+        if has_lot_ref and has_causal:
+            intention = Intent.EXPLICATION
+        
+        # --- COMPARAISON (avant campagne et fournisseur) ---
+        elif any(m in texte for m in [
+            "compare", "comparaison", "comparer",
+            "quelle campagne", "quelle huilerie",
+            "meilleure campagne", "la plus grande production",
+            "le plus de production", "le plus produit",
+            " vs ", " versus ", "par rapport",
+            "huilerie la plus", "campagne la plus",
+        ]):
+            intention = Intent.COMPARAISON
+        
         # Intents spécifiques EN PREMIER (avant stock/production génériques)
         if any(m in texte for m in [
             "meilleur fournisseur", "classement fournisseur", "top fournisseur",

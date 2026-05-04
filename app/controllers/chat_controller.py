@@ -11,6 +11,8 @@ from app.models import ChatRequest, ChatResponse
 from app.nlp.analyseur_llm import analyser_message_sync
 from app.nlp.normalizer import resolve_period
 from app.services.chatbot_service import ChatbotService
+from app.services.intent.comparaison import ComparaisonHandler
+from app.services.intent.explication import ExplicationHandler
 from app.services.intent.prediction import PredictionHandler
 from app.services.permission_service import (
     get_user_enterprise_id,
@@ -25,6 +27,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatbotService()
 prediction_handler = PredictionHandler()
+comparaison_handler = ComparaisonHandler(service)
+explication_handler = ExplicationHandler(service)
 
 SESSION_CONTEXT: dict[str, dict] = {}
 
@@ -1232,6 +1236,50 @@ def ask_chatbot(
             )
         response_data = {"lots": rows, "total_kg": total}
 
+    # --- COMPARAISON --------------------------------------------------------
+    elif intent == "comparaison":
+        query = ChatQuery.from_raw(
+            message=payload.message,
+            session_id=payload.session_id,
+            intent=Intent.COMPARAISON,
+            confidence=confidence,
+            huilerie=huilerie,
+            enterprise_id=user_enterprise_id,
+            permissions=applied_perms or [],
+            period_label=period_label,
+            explicit_period=explicit_period is not None,
+            start_date=start_date,
+            end_date=end_date,
+            extra_context={"entities": entities},
+        )
+        result = asyncio.run(comparaison_handler.handle(query))
+        response_text = result.text
+        response_data = result.structured_payload or result.data
+
+    # --- EXPLICATION --------------------------------------------------------
+    elif intent == "explication":
+        query = ChatQuery.from_raw(
+            message=payload.message,
+            session_id=payload.session_id,
+            intent=Intent.EXPLICATION,
+            confidence=confidence,
+            huilerie=huilerie,
+            enterprise_id=user_enterprise_id,
+            permissions=applied_perms or [],
+            period_label=period_label,
+            explicit_period=explicit_period is not None,
+            start_date=start_date,
+            end_date=end_date,
+            extra_context={
+                "entities": entities,
+                "lot_reference": entities.get("lot_reference"),
+                "code_lot": entities.get("code_lot"),
+            },
+        )
+        result = asyncio.run(explication_handler.handle(query))
+        response_text = result.text
+        response_data = result.data
+
     # --- UNKNOWN -------------------------------------------------------------
     else:
         logger.info("Intent non reconnu : %s", payload.message)
@@ -1247,7 +1295,9 @@ def ask_chatbot(
             "- **Qualité** et diagnostic\n"
             "- **Analyses laboratoire**\n"
             "- **Campagnes** de récolte\n"
-            "- **Mouvements de stock** et réceptions"
+            "- **Mouvements de stock** et réceptions\n"
+            "- **Comparaisons** (ex : *quelle campagne a eu la plus grande production ?*)\n"
+            "- **Explications** sur un lot (ex : *pourquoi la qualité du lot LO17 était mauvaise ?*)"
         )
         response_data = None
 

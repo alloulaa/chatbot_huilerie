@@ -22,6 +22,8 @@ class Intent(str, Enum):
     LOT_LISTE = "lot_liste"
     ANALYSE_LABO = "analyse_labo"
     MOUVEMENT_STOCK = "mouvement_stock"
+    COMPARAISON = "comparaison"
+    EXPLICATION = "explication"
     INCONNU = "inconnu"
 
 

@@ -29,6 +29,8 @@ INTENT_MODULE_MAP = {
     "mouvement_stock": "STOCK_MOUVEMENT",
     "reception": "RECEPTION",
     "campagne": "CAMPAGNE_OLIVES",
+    "comparaison": "CAMPAGNE_OLIVES",
+    "explication": "LOTS_TRAÇABILITE",
 }
 
 

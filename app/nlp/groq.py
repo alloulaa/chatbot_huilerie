@@ -30,7 +30,7 @@ Si une valeur est inconnue, utilise null.
 
 Structure JSON attendue :
 {
-  "intention": "stock|production|machine|machines_utilisees|rendement|qualite|diagnostic|prediction|reception|campagne|fournisseur|lot_cycle_vie|lot_liste|analyse_labo|mouvement_stock|inconnu",
+  "intention": "stock|production|machine|machines_utilisees|rendement|qualite|diagnostic|prediction|reception|campagne|fournisseur|lot_cycle_vie|lot_liste|analyse_labo|mouvement_stock|comparaison|explication|inconnu",
   "confiance": nombre entre 0.0 et 1.0,
   "huilerie": "nom exact ou null",
   "periode": "aujourd_hui|hier|cette_semaine|semaine_derniere|ce_mois|mois_dernier|annee_2025|annee_2026|null",
@@ -64,6 +64,31 @@ PRIORITE 3 - FOURNISSEUR (SEULEMENT si parle explicitement de fournisseurs) :
   → "fournisseur"
   Sinon si "stock" est present → TOUJOURS "stock"
 
+PRIORITE 4 - COMPARAISON (questions comparatives entre plusieurs entités ou périodes) :
+- Si le message contient une comparaison explicite entre plusieurs entités différentes ou une
+  question sur "la meilleure/plus grande/plus petite" parmi des campagnes, huileries ou périodes :
+  "quelle campagne a eu la plus grande production ?"
+  "compare la campagne 2024 et 2025"
+  "quelle huilerie produit le plus ?"
+  "compare la production ce mois vs le mois dernier"
+  "meilleure campagne en terme de rendement / olives"
+  "compare les huileries"
+  → TOUJOURS "comparaison"
+  MAIS "quel est le meilleur fournisseur ?" sans comparer avec une autre entité → "fournisseur"
+
+PRIORITE 5 - EXPLICATION (questions causales sur un lot SPECIFIQUE) :
+- Si le message demande POURQUOI ou une EXPLICATION concernant un lot precis (avec reference) :
+  "pourquoi la qualite du lot LO17 etait mauvaise ?"
+  "explique-moi le lot LO07"
+  "qu'est-ce qui a cause la mauvaise qualité du lot 3 ?"
+  "pourquoi le lot LO05 a une acidite elevee ?"
+  "analyse le lot LO12"
+  → TOUJOURS "explication" ET extraire code_lot / reference_lot
+  NE PAS confondre avec :
+    - "lot_cycle_vie" (historique/timeline, pas d'explication causale)
+    - "diagnostic"   (analyse agregee sur une periode, pas un lot precis)
+    - "analyse_labo" (liste brute des resultats, pas d'explication)
+
 Regles de detection d'intention (ordre respecte) :
 - stock / inventaire / olives disponibles / reserve / quantite disponible    -> "stock" (SAUF si "lots"/"liste" present)
 - production / huile produite / litres produits / fabrication / extraction   -> "production"
@@ -79,6 +104,9 @@ Regles de detection d'intention (ordre respecte) :
 - meilleur fournisseur / classement fournisseur / top fournisseur
   / qui livre mieux / qualite fournisseur / fournisseur le plus performant   -> "fournisseur"
   (SEULEMENT si "stock" seul n'est pas le keyword primaire)
+- compare / comparaison / quelle campagne / quelle huilerie (superlative)
+  / meilleure campagne / vs / versus / par rapport a                         -> "comparaison"
+- pourquoi lot / explique lot / cause qualite lot / analyse lot (avec ref)   -> "explication"
 - cycle de vie lot / historique lot / parcours lot / trajet lot
   / suivi lot / etapes du lot / que s'est-il passe pour le lot               -> "lot_cycle_vie"
 - liste des lots / lots non conformes / tracabilite lots / tous les lots

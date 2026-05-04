@@ -17,6 +17,8 @@ from app.services.intent.lot_liste import LotListeHandler
 from app.services.intent.machine import MachineHandler
 from app.services.intent.lot_cycle_vie import LotCycleVieHandler
 from app.services.intent.analyse_labo import AnalyseLaboHandler
+from app.services.intent.comparaison import ComparaisonHandler
+from app.services.intent.explication import ExplicationHandler
 from app.services.intent.production import ProductionHandler
 from app.services.intent.rendement import RendementHandler
 from app.services.intent.prediction import PredictionHandler
@@ -60,11 +62,15 @@ class ChatService:
             Intent.PRODUCTION: ProductionHandler(self.chatbot_service),
             Intent.RENDEMENT: RendementHandler(self.chatbot_service),
             Intent.PREDICTION: PredictionHandler(),
+            Intent.COMPARAISON: ComparaisonHandler(self.chatbot_service),
+            Intent.EXPLICATION: ExplicationHandler(self.chatbot_service),
             Intent.QUALITE: QualiteHandler(self.chatbot_service),
             Intent.DIAGNOSTIC: DiagnosticHandler(self.chatbot_service),
             Intent.CAMPAGNE: CampagneHandler(self.chatbot_service),
             Intent.RECEPTION: ReceptionHandler(self.chatbot_service),
             Intent.MOUVEMENT_STOCK: MouvementStockHandler(self.chatbot_service),
+            Intent.COMPARAISON: ComparaisonHandler(self.chatbot_service),
+            Intent.EXPLICATION: ExplicationHandler(self.chatbot_service),
         }
     
     async def process_message(
