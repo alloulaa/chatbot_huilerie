@@ -7,6 +7,7 @@ import unicodedata
 from typing import Any
 from app.nlp.factory import NLPFactory
 from app.nlp.base import NLPAnalyzer
+from app.nlp.huilerie_extractor import extract_huilerie_from_text
 from app.domain.chat import ChatQuery, IntentResult
 from app.domain.intent import Intent, RANKING_INTENTS, TIME_FILTERED_INTENTS
 from app.services.intent.base import IntentHandler
@@ -33,12 +34,6 @@ from app.nlp.normalizer import resolve_period
 logger = logging.getLogger(__name__)
 
 
-KNOWN_HUILERIES = (
-    "zitouneya",
-    "moulin sfax",
-    "moulin sousse",
-    "moulin artisanal",
-)
 
 
 class ChatService:
@@ -95,7 +90,7 @@ class ChatService:
         # Step 1: NLP Analysis
         nlp_result = await self.nlp.analyze(message)
         intent = nlp_result.intention
-        resolved_huilerie = nlp_result.huilerie or self._extract_huilerie_from_message(message) or huilerie
+        resolved_huilerie = nlp_result.huilerie or extract_huilerie_from_text(message) or huilerie
         
         logger.info(f"NLP result: intent={intent}, confidence={nlp_result.confiance}")
         
@@ -184,6 +179,21 @@ class ChatService:
     def _apply_intent_overrides(intent: Intent, message: str) -> Intent:
         """Appliquer les overrides d'intent basés sur les keywords."""
         msg_lower = message.lower().strip()
+
+        # Machine override: explicit inventory or state questions should stay on MACHINE.
+        machine_keywords = [
+            "machine", "machines", "panne", "en panne", "maintenance",
+            "hors service", "etat machine", "liste machines", "toutes les machines",
+            "quelles machines", "machines disponibles", "broyeur",
+        ]
+        machine_use_keywords = [
+            "machines les plus", "machine la plus", "frequence machine",
+            "usage machine", "machines utilisees", "machines utilisées",
+        ]
+        if any(k in msg_lower for k in machine_keywords) and not any(k in msg_lower for k in machine_use_keywords):
+            if intent not in (Intent.MACHINE, Intent.MACHINES_UTILISEES):
+                logger.info(f"Intent override: {intent} → MACHINE (machine keyword)")
+                return Intent.MACHINE
         
         # Stock override
         stock_keywords = ["stock", "inventaire", "quantite disponible", "reserve d'olive"]
@@ -217,12 +227,4 @@ class ChatService:
     @staticmethod
     def _extract_huilerie_from_message(message: str) -> str | None:
         """Reconnaître une huilerie explicitement citée dans le message."""
-        normalized = unicodedata.normalize("NFD", message.lower())
-        normalized = "".join(char for char in normalized if unicodedata.category(char) != "Mn")
-        normalized = " ".join(normalized.split())
-
-        for huilerie_name in KNOWN_HUILERIES:
-            if huilerie_name in normalized:
-                return huilerie_name
-
-        return None
+        return extract_huilerie_from_text(message)

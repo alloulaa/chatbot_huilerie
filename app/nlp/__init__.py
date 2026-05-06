@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from enum import Enum
 from types import ModuleType
 from typing import Any
 
@@ -13,7 +14,11 @@ from app.nlp.factory import NLPFactory
 async def analyser_message(message: str) -> dict[str, Any]:
 	"""Analyse a message with the active NLP implementation."""
 	result = await NLPFactory.get_instance().analyze(message)
-	return result._asdict()
+	data = result._asdict()
+	for key, value in list(data.items()):
+		if isinstance(value, Enum):
+			data[key] = value.value
+	return data
 
 
 def analyser_message_sync(message: str) -> dict[str, Any]:

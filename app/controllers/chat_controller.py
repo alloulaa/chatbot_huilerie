@@ -1,19 +1,15 @@
-import asyncio
 import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header
 
 from app.database import get_db_connection
-from app.domain.chat import ChatQuery
-from app.domain.intent import Intent
 from app.models import ChatRequest, ChatResponse
-from app.nlp.analyseur_llm import analyser_message_sync
+from app.nlp.analyseur_llm import analyser_message
 from app.nlp.normalizer import resolve_period
 from app.services.chatbot_service import ChatbotService
-from app.services.intent.comparaison import ComparaisonHandler
-from app.services.intent.explication import ExplicationHandler
-from app.services.intent.prediction import PredictionHandler
+import httpx
+from app.services.prediction_client import PredictionClient
 from app.services.permission_service import (
     get_user_enterprise_id,
     get_user_huilerie,
@@ -26,9 +22,6 @@ from app.services.permission_service import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatbotService()
-prediction_handler = PredictionHandler()
-comparaison_handler = ComparaisonHandler(service)
-explication_handler = ExplicationHandler(service)
 
 SESSION_CONTEXT: dict[str, dict] = {}
 
@@ -103,13 +96,6 @@ def _normalize_choice(message: str) -> str | None:
     return None
 
 
-def _normalize_intent(value: Any) -> str:
-    texte = str(value or "inconnu").strip().lower()
-    if texte.startswith("intent."):
-        texte = texte.split(".", 1)[1]
-    return texte
-
-
 def _huilerie_belongs_to_enterprise(huilerie_name: str | None, enterprise_id: int | None) -> bool:
     """Check if a huilerie name belongs to a given enterprise.
     
@@ -132,7 +118,56 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _annotate_fournisseurs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _annotate_stock(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Annotate stock rows with guaranteed numeric fields."""
+    annotated: list[dict[str, Any]] = []
+    for idx, r in enumerate(rows, start=1):
+        variete: str = r.get("variete") or "Inconnue"
+        total_stock: float = _safe_float(r.get("total_stock"), 0.0)
+
+        nr = dict(r)
+        nr["rang"] = idx
+        nr["variete"] = variete
+        nr["total_stock"] = total_stock
+        nr["name"] = variete
+
+        # String variants for display
+        nr["stock_str"] = f"{total_stock:,.0f} kg".replace(",", " ")
+
+        annotated.append(nr)
+    return annotated
+
+
+def _build_stock_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build chart-friendly payload for stock data."""
+    stocks: list[dict[str, Any]] = []
+    labels: list[str] = []
+    ds_stock: list[float] = []
+
+    for r in annotated:
+        variete = r.get("name") or r.get("variete") or "Inconnue"
+        total_stock = _safe_float(r.get("total_stock"), 0.0)
+
+        stocks.append({
+            "rang": r.get("rang"),
+            "name": variete,
+            "variete": variete,
+            "total_stock": total_stock,
+            "stock_str": r.get("stock_str"),
+        })
+
+        labels.append(variete)
+        ds_stock.append(total_stock)
+
+    datasets = [
+        {"label": "Stock total (kg)", "data": ds_stock, "type": "bar"},
+    ]
+
+    return {
+        "stocks": stocks,
+        "labels": labels,
+        "datasets": datasets,
+    }
     """Annotate supplier rows with status flags and guaranteed numeric fields.
 
     Ensures that kg, acidity, rendement, lots are JSON numbers (float/int),
@@ -407,6 +442,42 @@ def _annotate_analyses(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return annotated
 
 
+def _annotate_fournisseurs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Annotate fournisseur rows with guaranteed numeric fields."""
+    annotated: list[dict[str, Any]] = []
+    for idx, r in enumerate(rows, start=1):
+        fournisseur_nom: str = r.get("fournisseur_nom") or "Inconnu"
+        lots: int = int(_safe_float(r.get("nb_lots"), 0))
+        kg: float = _safe_float(r.get("quantite_totale_kg"), 0.0)
+        rendement: float = _safe_float(r.get("rendement_moyen"), 0.0)
+        acidity: float = _safe_float(r.get("acidite_moyenne"), 0.0)
+
+        # Status flags for quality
+        acidite_status = "ok" if 0.5 <= acidity <= 2.0 else "out of range"
+        rendement_status = "ok" if rendement >= 10.0 else "out of range"
+
+        nr = dict(r)
+        nr["rang"] = idx
+        nr["fournisseur_nom"] = fournisseur_nom
+        nr["lots"] = lots
+        nr["kg"] = kg
+        nr["rendement"] = rendement
+        nr["acidity"] = acidity
+        nr["name"] = fournisseur_nom
+
+        # String variants
+        nr["kg_str"] = f"{kg:,.0f} kg".replace(",", " ")
+        nr["acidity_str"] = f"{acidity:.2f} %".replace(".", ",")
+        nr["rendement_str"] = f"{rendement:.1f} %".replace(".", ",")
+
+        # Status
+        nr["acidite_status"] = acidite_status
+        nr["rendement_status"] = rendement_status
+
+        annotated.append(nr)
+    return annotated
+
+
 def _build_analyses_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
     """Build chart-friendly payload for lab analysis ranking."""
     analyses: list[dict[str, Any]] = []
@@ -636,10 +707,11 @@ def _build_response(
         if selected_choice == "texte":
             ctx.pop("pending_visualization", None)
             text_message = pending.get("text_message") or response_text
+            pending_intent = pending.get("intent") or intent
             return ChatResponse(
                 type="text",
                 message=text_message,
-                intent=intent,
+                intent=pending_intent,
                 confidence=confidence,
                 entities=entities,
                 response=text_message,
@@ -669,7 +741,24 @@ def _build_response(
 
     # Special handling for structured ranking intents
     ranking_intents = {"fournisseur", "machines_utilisees", "lot_liste", "analyse_labo"}
-    
+
+    # Machine list/status requests are not ranking queries: return text + structured data directly.
+    if intent == "machine" and isinstance(response_data, list) and response_data:
+        annotated = _annotate_machines(response_data)
+        structured_payload = _build_machines_payload(annotated)
+        ctx.pop("pending_visualization", None)
+        return ChatResponse(
+            type="text",
+            message=response_text,
+            intent=intent,
+            confidence=confidence,
+            entities=entities,
+            response=response_text,
+            data=structured_payload,
+            applied_scope=applied_scope,
+            applied_permissions=applied_permissions,
+        )
+
     if intent in ranking_intents and isinstance(response_data, list) and response_data:
         # Annotate and structure the data
         if intent == "fournisseur":
@@ -720,6 +809,7 @@ def _build_response(
                     "chart_data": chart_data,
                     "chart_type": chart_type,
                     "raw_data": structured_payload,
+                    "intent": intent,
                 }
                 question = "Souhaitez-vous voir les résultats sous forme de texte ou de graphique ?"
                 return ChatResponse(
@@ -775,6 +865,7 @@ def _build_response(
             "chart_data": chart_data,
             "chart_type": chart_type,
             "raw_data": response_data,
+            "intent": intent,
         }
         question = "Souhaitez-vous voir les résultats sous forme de texte ou de graphique ?"
         return ChatResponse(
@@ -828,7 +919,7 @@ def _build_response(
 # ---------------------------------------------------------------------------
 
 @router.post("/ask", response_model=ChatResponse)
-def ask_chatbot(
+async def ask_chatbot(
     payload: ChatRequest,
     authorization: Annotated[str | None, Header()] = None,
 ):
@@ -860,8 +951,20 @@ def ask_chatbot(
         applied_perms = auth_data.get("permissions", [])
 
     # ── NLP ──────────────────────────────────────────────────────────────────
-    resultat = analyser_message_sync(payload.message)
-    intent = _normalize_intent(resultat.get("intention"))
+    resultat = await analyser_message(payload.message)
+    intent = str(resultat.get("intention") or "inconnu").strip().lower()
+    message_lower = payload.message.lower().strip()
+    machine_use_keywords = [
+        "machines les plus", "machine la plus", "frequence machine",
+        "usage machine", "machines utilisees", "machines utilisées",
+    ]
+    machine_list_keywords = [
+        "liste machines", "liste des machines", "toutes les machines",
+        "tous les machines", "quelles machines", "machines disponibles",
+        "inventaire machines",
+    ]
+    if any(k in message_lower for k in machine_list_keywords) and not any(k in message_lower for k in machine_use_keywords):
+        intent = "machine"
     try:
         confidence = float(resultat.get("confiance", 0.5))
     except (TypeError, ValueError):
@@ -977,8 +1080,11 @@ def ask_chatbot(
         rows = result.get("value") or []
         if not rows:
             response_text = f"Aucune donnée de stock pour {period_text}.{ctx_note}"
+            response_data = {"stocks": [], "labels": [], "datasets": []}
         else:
-            lines = [f"- {r['variete']} : **{_fmt(r['total_stock'])} kg**" for r in rows]
+            annotated = _annotate_stock(rows)
+            response_data = _build_stock_payload(annotated)
+            lines = [f"- {r['variete']} : **{r['stock_str']}**" for r in annotated]
             response_text = f"Stock {scope_text} :\n" + "\n".join(lines) + ctx_note
         response_data = rows
 
@@ -994,18 +1100,64 @@ def ask_chatbot(
 
     # --- MACHINE — état ------------------------------------------------------
     elif intent == "machine":
-        result = service.get_machines(huilerie, start_date, end_date, user_enterprise_id)
-        rows = result.get("value") or []
-        if not rows:
-            response_text = f"Toutes les machines sont opérationnelles {scope_text}.{ctx_note}"
+        is_list_request = any(word in message_lower for word in [
+            "liste", "toutes", "tous", "toutes les", "tous les",
+            "quelles machines", "machines disponibles", "inventaire machines",
+        ])
+        is_panne_request = any(word in message_lower for word in ["en panne", "panne", "hors service"])
+
+        if is_list_request and not is_panne_request:
+            result = service.get_all_machines(huilerie, user_enterprise_id)
+            rows = result.get("value") or []
+            if not rows:
+                response_text = f"Aucune machine trouvée {scope_text}.{ctx_note}"
+            else:
+                if huilerie:
+                    lines = [
+                        f"- **{r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')}** : {r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'EN SERVICE')}"
+                        for r in rows
+                    ]
+                    response_text = f"Machines de l'huilerie {huilerie} :\n" + "\n".join(lines) + ctx_note
+                else:
+                    sections: dict[str, list[dict[str, Any]]] = {}
+                    for row in rows:
+                        huilerie_name = row.get("huilerie") or "Huilerie inconnue"
+                        sections.setdefault(huilerie_name, []).append(row)
+                    formatted_sections = []
+                    for huilerie_name, machines in sections.items():
+                        lines = [f"**{huilerie_name}**:"]
+                        lines.extend(
+                            f"  - {r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')} : {r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'EN SERVICE')}"
+                            for r in machines
+                        )
+                        formatted_sections.append("\n".join(lines))
+                    response_text = "Liste des machines :\n\n" + "\n\n".join(formatted_sections) + ctx_note
+            response_data = rows
         else:
-            lines = [
-                f"- **{r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')}** : "
-                f"{r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'INCONNU')}"
-                for r in rows
-            ]
-            response_text = f"Machines nécessitant attention {scope_text} :\n" + "\n".join(lines) + ctx_note
-        response_data = rows
+            result = service.get_machines(
+                huilerie,
+                start_date,
+                end_date,
+                user_enterprise_id,
+                status_filter="maintenance" if is_panne_request else None,
+            )
+            rows = result.get("value") or []
+            if not rows:
+                if is_panne_request:
+                    response_text = f"Aucune machine en maintenance trouvée {scope_text}.{ctx_note}"
+                else:
+                    response_text = f"Toutes les machines sont opérationnelles {scope_text}.{ctx_note}"
+            else:
+                lines = [
+                    f"- **{r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')}** : "
+                    f"{r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'INCONNU')}"
+                    for r in rows
+                ]
+                if is_panne_request:
+                    response_text = f"Machines en panne (état maintenance) {scope_text} :\n" + "\n".join(lines) + ctx_note
+                else:
+                    response_text = f"Machines nécessitant attention {scope_text} :\n" + "\n".join(lines) + ctx_note
+            response_data = rows
 
     # --- MACHINES LES PLUS UTILISÉES -----------------------------------------
     elif intent == "machines_utilisees":
@@ -1040,24 +1192,51 @@ def ask_chatbot(
 
     # --- PREDICTION ----------------------------------------------------------
     elif intent == "prediction":
-        prediction_payload = payload.prediction_payload or {}
-        query = ChatQuery.from_raw(
-            message=payload.message,
-            session_id=payload.session_id,
-            intent=Intent.PREDICTION,
-            confidence=confidence,
-            huilerie=huilerie,
-            enterprise_id=user_enterprise_id,
-            permissions=applied_perms or [],
-            period_label=period_label,
-            explicit_period=explicit_period is not None,
-            start_date=start_date,
-            end_date=end_date,
-            extra_context={"prediction_payload": prediction_payload},
-        )
-        result = asyncio.run(prediction_handler.handle(query))
-        response_text = result.text
-        response_data = result.data
+        # If the frontend provided a direct prediction payload, prefer calling
+        # the prediction microservice (default: http://127.0.0.1:7500).
+        if getattr(payload, "prediction_payload", None):
+            client = PredictionClient()
+            try:
+                result = await client.predict(payload.prediction_payload)
+            except httpx.HTTPStatusError as e:
+                if e.response is not None and e.response.status_code == 422:
+                    # validation error: reflect to frontend
+                    response_text = "Le payload de prédiction est invalide (400/422)."
+                    response_data = {"service_available": True, "validation_error": True}
+                else:
+                    response_text = "Le service de prédiction a renvoyé une erreur HTTP."
+                    response_data = {"service_available": False}
+            except httpx.ReadTimeout:
+                response_text = "Le service de prédiction est trop lent actuellement (timeout)."
+                response_data = {"service_available": False, "timeout": True}
+            except Exception:
+                response_text = "Le service de prédiction est temporairement indisponible."
+                response_data = {"service_available": False}
+            else:
+                # Expect microservice keys like rendement_predit_pourcent / quantite_huile_recalculee_litres
+                rend = result.get("rendement_predit_pourcent") or result.get("rendement_predit") or 0
+                qte = result.get("quantite_huile_recalculee_litres") or result.get("quantite_estimee") or 0
+                if rend <= 0 and qte <= 0:
+                    response_text = f"Aucune prédiction disponible pour {period_text}.{ctx_note}"
+                else:
+                    response_text = (
+                        f"Prédiction {scope_text} : rendement prédit **{_fmt(rend, 1)} %**, "
+                        f"production estimée **{_fmt(qte)} litres**.{ctx_note}"
+                    )
+                response_data = result
+        else:
+            # Fallback to stored predictions in DB
+            result = service.get_prediction(huilerie, start_date, end_date, user_enterprise_id)
+            rend = result.get("rendement_predit", 0)
+            qte  = result.get("quantite_estimee", 0)
+            if rend <= 0 and qte <= 0:
+                response_text = f"Aucune prédiction disponible pour {period_text}.{ctx_note}"
+            else:
+                response_text = (
+                    f"Prédiction {scope_text} : rendement prédit **{_fmt(rend, 1)} %**, "
+                    f"production estimée **{_fmt(qte)} litres**.{ctx_note}"
+                )
+            response_data = result
 
     # --- QUALITE -------------------------------------------------------------
     elif intent == "qualite":
@@ -1184,10 +1363,44 @@ def ask_chatbot(
     # --- ANALYSE LABO --------------------------------------------------------
     elif intent == "analyse_labo":
         lot_ref = entities.get("lot_reference") or entities.get("code_lot")
-        result = service.get_analyse_labo(huilerie, start_date, end_date, user_enterprise_id, lot_ref)
+        query_start_date = start_date if entities.get("periode") else None
+        query_end_date = end_date if entities.get("periode") else None
+        result = service.get_analyse_labo(huilerie, query_start_date, query_end_date, user_enterprise_id, lot_ref)
         rows = result.get("value") or []
+        def _is_anomalous(row: dict) -> bool:
+            try:
+                acidite = float(row.get("acidite_huile_pourcent"))
+            except (TypeError, ValueError):
+                acidite = None
+            try:
+                peroxyde = float(row.get("indice_peroxyde_meq_o2_kg"))
+            except (TypeError, ValueError):
+                peroxyde = None
+            try:
+                k270 = float(row.get("k270"))
+            except (TypeError, ValueError):
+                k270 = None
+            try:
+                k232 = float(row.get("k232"))
+            except (TypeError, ValueError):
+                k232 = None
+            try:
+                polyphenols = float(row.get("polyphenols_mg_kg"))
+            except (TypeError, ValueError):
+                polyphenols = None
+
+            return any([
+                acidite is not None and acidite > 0.8,
+                peroxyde is not None and (peroxyde < 5.0 or peroxyde > 40.0),
+                k270 is not None and k270 > 0.22,
+                k232 is not None and (k232 < 1.5 or k232 > 3.5),
+                polyphenols is not None and (polyphenols < 100.0 or polyphenols > 800.0),
+            ])
+
+        rows = [row for row in rows if _is_anomalous(row)]
+
         if not rows:
-            response_text = f"Aucune analyse laboratoire pour {period_text}.{ctx_note}"
+            response_text = f"Aucune analyse anormale pour {period_text}.{ctx_note}"
         else:
             lines = []
             for r in rows[:8]:
@@ -1236,50 +1449,6 @@ def ask_chatbot(
             )
         response_data = {"lots": rows, "total_kg": total}
 
-    # --- COMPARAISON --------------------------------------------------------
-    elif intent == "comparaison":
-        query = ChatQuery.from_raw(
-            message=payload.message,
-            session_id=payload.session_id,
-            intent=Intent.COMPARAISON,
-            confidence=confidence,
-            huilerie=huilerie,
-            enterprise_id=user_enterprise_id,
-            permissions=applied_perms or [],
-            period_label=period_label,
-            explicit_period=explicit_period is not None,
-            start_date=start_date,
-            end_date=end_date,
-            extra_context={"entities": entities},
-        )
-        result = asyncio.run(comparaison_handler.handle(query))
-        response_text = result.text
-        response_data = result.structured_payload or result.data
-
-    # --- EXPLICATION --------------------------------------------------------
-    elif intent == "explication":
-        query = ChatQuery.from_raw(
-            message=payload.message,
-            session_id=payload.session_id,
-            intent=Intent.EXPLICATION,
-            confidence=confidence,
-            huilerie=huilerie,
-            enterprise_id=user_enterprise_id,
-            permissions=applied_perms or [],
-            period_label=period_label,
-            explicit_period=explicit_period is not None,
-            start_date=start_date,
-            end_date=end_date,
-            extra_context={
-                "entities": entities,
-                "lot_reference": entities.get("lot_reference"),
-                "code_lot": entities.get("code_lot"),
-            },
-        )
-        result = asyncio.run(explication_handler.handle(query))
-        response_text = result.text
-        response_data = result.data
-
     # --- UNKNOWN -------------------------------------------------------------
     else:
         logger.info("Intent non reconnu : %s", payload.message)
@@ -1295,9 +1464,7 @@ def ask_chatbot(
             "- **Qualité** et diagnostic\n"
             "- **Analyses laboratoire**\n"
             "- **Campagnes** de récolte\n"
-            "- **Mouvements de stock** et réceptions\n"
-            "- **Comparaisons** (ex : *quelle campagne a eu la plus grande production ?*)\n"
-            "- **Explications** sur un lot (ex : *pourquoi la qualité du lot LO17 était mauvaise ?*)"
+            "- **Mouvements de stock** et réceptions"
         )
         response_data = None
 

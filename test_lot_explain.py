@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import asyncio
+
 from app.models import ChatRequest
 from app.controllers.chat_controller import ask_chatbot
 
@@ -8,7 +10,7 @@ payload = ChatRequest(
     session_id="test-session-2",
 )
 
-resp = ask_chatbot(payload)
+resp = asyncio.run(ask_chatbot(payload))
 print("=== ask_chatbot response ===")
 print(f"type: {resp.type}")
 print(f"intent: {resp.intent}")

@@ -157,22 +157,94 @@ class ChatbotService:
             if connection is not None and connection.is_connected():
                 connection.close()
 
+    def get_all_machines(
+        self,
+        huilerie: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Get all machines (not just problematic ones) for listing purposes."""
+        query = """
+            SELECT DISTINCT m.nom_machine, m.etat_machine, m.reference, m.capacite, h.nom AS huilerie_nom
+            FROM machine m
+            JOIN huilerie h ON h.id_huilerie = m.huilerie_id
+            WHERE 1=1
+        """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        query += " ORDER BY h.nom, m.nom_machine"
+
+        connection = None
+        cursor = None
+        try:
+            connection = get_db_connection()
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(query, tuple(params))
+            rows = cursor.fetchall() or []
+
+            normalized = []
+            for row in rows:
+                machine_name = (
+                    row.get("nom_machine")
+                    or row.get("nomMachine")
+                    or row.get("machine")
+                    or "Machine inconnue"
+                )
+                machine_state = (
+                    row.get("etat_machine")
+                    or row.get("etatMachine")
+                    or row.get("probleme")
+                    or row.get("etat")
+                    or "EN SERVICE"
+                )
+                huilerie_nom = row.get("huilerie_nom") or "Huilerie inconnue"
+                
+                normalized.append({
+                    "nomMachine": machine_name, 
+                    "etatMachine": machine_state,
+                    "huilerie": huilerie_nom
+                })
+
+            return {"value": normalized}
+        except Exception as exc:
+            logger.exception("Error while reading all machines: %s", exc)
+            return {"value": []}
+        finally:
+            if cursor is not None:
+                cursor.close()
+            if connection is not None and connection.is_connected():
+                connection.close()
+
     def get_machines(
         self,
         huilerie: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         enterprise_id: int | None = None,
+        status_filter: str | None = None,
     ) -> dict[str, Any]:
-        # Query for machines that need attention (maintenance, surveillance, panne, etc.)
-        # Status filter is applied without date constraints to catch all problematic machines
+        # A specific status filter can be requested for targeted questions like "machines en panne".
+        normalized_status = status_filter.strip().lower() if status_filter else None
+        if normalized_status in {"panne", "en panne"}:
+            normalized_status = "maintenance"
+
         query = """
             SELECT DISTINCT m.nom_machine, m.etat_machine, m.reference, m.capacite
             FROM machine m
             JOIN huilerie h ON h.id_huilerie = m.huilerie_id
-            WHERE LOWER(COALESCE(m.etat_machine, 'en service')) IN ('maintenance', 'surveillance', 'en panne', 'panne')
+            WHERE 1=1
         """
         params: list[Any] = []
+        if normalized_status:
+            query += " AND LOWER(COALESCE(m.etat_machine, 'en service')) = %s"
+            params.append(normalized_status)
+        else:
+            query += " AND LOWER(COALESCE(m.etat_machine, 'en service')) IN ('maintenance', 'surveillance', 'en panne', 'panne')"
+
         if enterprise_id is not None:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
@@ -225,30 +297,58 @@ class ChatbotService:
         end_date: str | None = None,
         enterprise_id: int | None = None,
     ) -> dict[str, Any]:
+        # execution_production no longer links directly to machine.
+        # Use etape_production -> machine to aggregate real usage counts.
         query = """
             SELECT
                 m.nom_machine,
                 m.reference AS machine_ref,
-                COUNT(DISTINCT ep.id_execution_production) AS nb_executions,
-                COALESCE(AVG(ep.rendement), 0) AS rendement_moyen,
-                COALESCE(SUM(pf.quantite_produite), 0) AS total_produit
+                COALESCE(u.nb_executions, 0) AS nb_executions,
+                COALESCE(u.rendement_moyen, 0) AS rendement_moyen,
+                COALESCE(u.total_produit, 0) AS total_produit
             FROM machine m
             JOIN huilerie h ON h.id_huilerie = m.huilerie_id
-            LEFT JOIN execution_production ep ON ep.machine_id = m.id_machine
-            LEFT JOIN produit_final pf ON pf.execution_production_id = ep.id_execution_production
-            WHERE 1=1
+            LEFT JOIN (
+                SELECT
+                    et.machine_id,
+                    COUNT(DISTINCT ep.id_execution_production) AS nb_executions,
+                    AVG(ep.rendement) AS rendement_moyen,
+                    SUM(COALESCE(pf.quantite_produite, 0)) AS total_produit
+                FROM etape_production et
+                JOIN guide_production gp ON gp.id_guide_production = et.guide_production_id
+                JOIN execution_production ep ON ep.guide_production_id = gp.id_guide_production
+                LEFT JOIN produit_final pf ON pf.execution_production_id = ep.id_execution_production
+                JOIN lot_olives lo ON lo.id_lot = ep.lot_olives_id
+                JOIN huilerie h2 ON h2.id_huilerie = lo.huilerie_id
+                WHERE et.machine_id IS NOT NULL
         """
-        params: list[Any] = []
+        subquery_params: list[Any] = []
+        subquery_filters: list[str] = []
+        if enterprise_id is not None:
+            subquery_filters.append("h2.entreprise_id = %s")
+            subquery_params.append(enterprise_id)
+        if huilerie:
+            subquery_filters.append("LOWER(h2.nom) = LOWER(%s)")
+            subquery_params.append(huilerie)
+        if start_date and end_date:
+            subquery_filters.append("ep.date_debut BETWEEN %s AND %s")
+            subquery_params.extend([start_date, end_date])
+
+        if subquery_filters:
+            query += " AND " + " AND ".join(subquery_filters)
+        query += " GROUP BY et.machine_id ) u ON u.machine_id = m.id_machine"
+        query += " WHERE 1=1"
+
+        outer_params: list[Any] = []
         if enterprise_id is not None:
             query += " AND h.entreprise_id = %s"
-            params.append(enterprise_id)
+            outer_params.append(enterprise_id)
         if huilerie:
             query += " AND LOWER(h.nom) = LOWER(%s)"
-            params.append(huilerie)
-        if start_date and end_date:
-            query += " AND ep.date_debut BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
-        query += " GROUP BY m.id_machine ORDER BY nb_executions DESC, total_produit DESC, m.nom_machine ASC"
+            outer_params.append(huilerie)
+        query += " ORDER BY m.nom_machine ASC"
+
+        params: list[Any] = subquery_params + outer_params
 
         connection = None
         cursor = None
@@ -323,6 +423,55 @@ class ChatbotService:
         except Exception as exc:
             logger.exception("Error while reading rendement: %s", exc)
             return {"value": 0.0}
+        finally:
+            if cursor is not None:
+                cursor.close()
+            if connection is not None and connection.is_connected():
+                connection.close()
+
+    def get_prediction(
+        self,
+        huilerie: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        enterprise_id: int | None = None,
+    ) -> dict[str, Any]:
+        query = """
+            SELECT
+                AVG(p.rendement_predit_pourcent) AS rendement_predit,
+                AVG(p.quantite_huile_recalculee_litres) AS quantite_estimee
+            FROM prediction p
+            JOIN execution_production ep ON ep.id_execution_production = p.execution_production_id
+            JOIN lot_olives lo ON lo.id_lot = ep.lot_olives_id
+            JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            WHERE 1=1
+        """
+        params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            params.append(huilerie)
+        if start_date and end_date:
+            query += " AND ep.date_debut BETWEEN %s AND %s"
+            params.extend([start_date, end_date])
+
+        connection = None
+        cursor = None
+        try:
+            connection = get_db_connection()
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute(query, tuple(params))
+            row = cursor.fetchone()
+
+            rendement_predit = self._to_float(row.get("rendement_predit") if row else None, 0.0)
+            quantite_estimee = self._to_float(row.get("quantite_estimee") if row else None, 0.0)
+
+            return {"rendement_predit": rendement_predit, "quantite_estimee": quantite_estimee}
+        except Exception as exc:
+            logger.exception("Error while reading prediction: %s", exc)
+            return {"rendement_predit": 0.0, "quantite_estimee": 0.0}
         finally:
             if cursor is not None:
                 cursor.close()
@@ -409,7 +558,7 @@ class ChatbotService:
         enterprise_id: int | None = None,
     ) -> dict[str, Any]:
         query = """
-            SELECT al.acidite_huile_pourcent, al.indice_peroxyde_meq_o2_kg, al.k270
+            SELECT al.acidite_huile_pourcent, al.indice_peroxyde_meq_o2_kg, al.k270, al.k232, al.polyphenols_mg_kg
             FROM analyse_laboratoire al
             JOIN lot_olives lo ON lo.id_lot = al.lot_id
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
@@ -439,13 +588,19 @@ class ChatbotService:
                 acidite = self._to_float(row.get("acidite_huile_pourcent"), 0.0)
                 peroxyde = self._to_float(row.get("indice_peroxyde_meq_o2_kg"), 0.0)
                 k270 = self._to_float(row.get("k270"), 0.0)
+                k232 = self._to_float(row.get("k232"), 0.0)
+                polyphenols = self._to_float(row.get("polyphenols_mg_kg"), 0.0)
 
-                if acidite > 0.8:
-                    issues.append("acidite elevee")
-                if peroxyde > 20:
-                    issues.append("indice de peroxyde eleve")
-                if k270 > 0.22:
-                    issues.append("k270 eleve")
+                if acidite < 0.1 or acidite > 5:
+                    issues.append("acidite hors intervalle standard")
+                if peroxyde < 5 or peroxyde > 40:
+                    issues.append("indice de peroxyde hors intervalle standard")
+                if k270 < 0.1 or k270 > 0.5:
+                    issues.append("k270 hors intervalle standard")
+                if k232 < 1.5 or k232 > 3.5:
+                    issues.append("k232 hors intervalle standard")
+                if polyphenols and (polyphenols < 100 or polyphenols > 800):
+                    issues.append("polyphenols hors intervalle standard")
 
             # Preserve order while removing duplicates.
             unique_issues = list(dict.fromkeys(issues))
@@ -482,6 +637,18 @@ class ChatbotService:
 
         return text
 
+    @staticmethod
+    def _resolve_lot_supplier_select(cursor, lot_alias: str = "lo") -> tuple[str, str]:
+        cursor.execute("DESCRIBE lot_olives")
+        cols = {c["Field"] for c in (cursor.fetchall() or [])}
+
+        if "fournisseur_nom" in cols:
+            return f"{lot_alias}.fournisseur_nom AS fournisseur_nom", ""
+
+        join_sql = f" LEFT JOIN fournisseur f ON f.id_fournisseur = {lot_alias}.fournisseur_id"
+        select_sql = "COALESCE(NULLIF(TRIM(f.nom), ''), 'Inconnu') AS fournisseur_nom"
+        return select_sql, join_sql
+
     def get_meilleur_fournisseur(
         self,
         huilerie: str | None = None,
@@ -491,7 +658,7 @@ class ChatbotService:
     ) -> dict[str, Any]:
         query = """
             SELECT
-                COALESCE(NULLIF(TRIM(lo.fournisseur_nom), ''), 'Inconnu') AS fournisseur_nom,
+                {supplier_select},
                 COUNT(*) AS nb_lots,
                 COALESCE(SUM(lo.quantite_initiale), 0) AS quantite_totale_kg,
                 COALESCE(AVG(ep.rendement), 0) AS rendement_moyen,
@@ -499,6 +666,7 @@ class ChatbotService:
             FROM lot_olives lo
             LEFT JOIN execution_production ep ON ep.lot_olives_id = lo.id_lot
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            {supplier_join}
             WHERE 1=1
         """
         params: list[Any] = []
@@ -518,6 +686,8 @@ class ChatbotService:
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
+            supplier_select, supplier_join = self._resolve_lot_supplier_select(cursor)
+            query = query.format(supplier_select=supplier_select, supplier_join=supplier_join)
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 
@@ -558,7 +728,7 @@ class ChatbotService:
                 lo.id_lot,
                 lo.reference,
                 lo.variete,
-                lo.fournisseur_nom,
+                {supplier_select},
                 lo.quantite_initiale,
                 lo.quantite_restante,
                 lo.date_reception,
@@ -567,6 +737,7 @@ class ChatbotService:
                 h.nom AS huilerie_nom
             FROM lot_olives lo
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            {supplier_join}
             WHERE (LOWER(lo.reference) = LOWER(%s)
                OR CAST(lo.id_lot AS CHAR) = %s)
         """
@@ -603,6 +774,8 @@ class ChatbotService:
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
+            supplier_select, supplier_join = self._resolve_lot_supplier_select(cursor)
+            query_lot = query_lot.format(supplier_select=supplier_select, supplier_join=supplier_join)
             cursor.execute(query_lot, tuple(params_lot))
             lot_row = cursor.fetchone()
             if not lot_row:
@@ -697,7 +870,7 @@ class ChatbotService:
                 lo.id_lot,
                 lo.reference,
                 lo.variete,
-                lo.fournisseur_nom,
+                {supplier_select},
                 lo.quantite_initiale,
                 lo.quantite_restante,
                 lo.date_reception,
@@ -707,6 +880,7 @@ class ChatbotService:
                 h.nom AS huilerie_nom
             FROM lot_olives lo
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            {supplier_join}
             LEFT JOIN execution_production ep ON ep.lot_olives_id = lo.id_lot
             LEFT JOIN produit_final pf ON pf.execution_production_id = ep.id_execution_production
             LEFT JOIN analyse_laboratoire al ON al.lot_id = lo.id_lot
@@ -732,6 +906,8 @@ class ChatbotService:
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
+            supplier_select, supplier_join = self._resolve_lot_supplier_select(cursor)
+            query = query.format(supplier_select=supplier_select, supplier_join=supplier_join)
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 
@@ -994,12 +1170,13 @@ class ChatbotService:
             SELECT
                 lo.reference,
                 lo.variete,
-                lo.fournisseur_nom,
+                {supplier_select},
                 lo.quantite_initiale,
                 lo.date_reception,
                 h.nom AS huilerie_nom
             FROM lot_olives lo
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+            {supplier_join}
             WHERE 1=1
         """
         params: list[Any] = []
@@ -1019,6 +1196,8 @@ class ChatbotService:
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
+            supplier_select, supplier_join = self._resolve_lot_supplier_select(cursor)
+            query = query.format(supplier_select=supplier_select, supplier_join=supplier_join)
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 

@@ -24,10 +24,11 @@ from app.services.chatbot_service import ChatbotService
 logger = logging.getLogger(__name__)
 
 SEUILS = {
-    "acidite_huile_pourcent": (0.8, 2.0, None),
-    "indice_peroxyde_meq_o2_kg": (20.0, 20.0, None),
-    "k270": (0.22, 0.25, None),
-    "k232": (2.50, 2.60, None),
+    "acidite_huile_pourcent": (0.1, 5.0, None),
+    "indice_peroxyde_meq_o2_kg": (5.0, 40.0, None),
+    "polyphenols_mg_kg": (100.0, 800.0, None),
+    "k270": (0.1, 0.5, None),
+    "k232": (1.5, 3.5, None),
 }
 
 LABEL_SEUIL = {
@@ -120,41 +121,41 @@ def _analyse_labo_issues(labo_rows: list[dict]) -> list[str]:
     k232 = _safe_float(r.get("k232"))
     polyphenols = _safe_float(r.get("polyphenols_mg_kg"))
 
-    if acid > 0.8:
-        grade = "vierge" if acid <= 2.0 else "lampante"
+    if acid < 0.1 or acid > 5.0:
+        grade = "hors norme" if acid < 0.1 else "hors intervalle"
         issues.append(
-            f"🔴 **Acidité élevée** ({_fmt(acid)} % > seuil vierge extra 0,8 %) → "
-            f"huile classée au mieux **{grade}**. Cause probable : olives trop mûres, blessées, "
+            f"🔴 **Acidité hors intervalle standard** ({_fmt(acid)} % ; intervalle 0,1 à 5 %) → "
+            f"huile classée **{grade}**. Cause probable : olives trop mûres, blessées, "
             f"stockées trop longtemps avant trituration ou températures de récolte/stockage élevées."
         )
-    elif acid > 0.5:
+    elif acid > 0.8:
         issues.append(
-            f"🟡 **Acidité limite** ({_fmt(acid)} %) — encore dans la norme vierge extra (< 0,8 %) "
-            f"mais proche du seuil. Surveiller la qualité à la récolte suivante."
+            f"🟡 **Acidité surveiller** ({_fmt(acid)} %) — encore dans l'intervalle standard, "
+            f"mais proche de la limite haute (5 %)."
         )
 
-    if perox > 20.0:
+    if perox < 5.0 or perox > 40.0:
         issues.append(
-            f"🔴 **Indice de peroxyde élevé** ({_fmt(perox, 1)} meq O₂/kg > seuil 20) → "
+            f"🔴 **Indice de peroxyde hors intervalle standard** ({_fmt(perox, 1)} meq O₂/kg ; intervalle 5 à 40) → "
             f"oxydation primaire de l'huile. Cause probable : contact prolongé avec l'air, "
             f"températures élevées lors du malaxage ou stockage inapproprié."
         )
 
-    if k270 > 0.22:
+    if k270 < 0.1 or k270 > 0.5:
         issues.append(
-            f"🔴 **K270 hors norme** ({_fmt(k270, 3)} > seuil vierge extra 0,22) → "
+            f"🔴 **K270 hors intervalle standard** ({_fmt(k270, 3)} ; intervalle 0,1 à 0,5) → "
             f"présence de produits d'oxydation secondaire. Cause probable : huile ancienne, "
             f"chauffage excessif ou raffinage partiel."
         )
 
-    if k232 > 2.50:
+    if k232 < 1.5 or k232 > 3.5:
         issues.append(
-            f"🟡 **K232 élevé** ({_fmt(k232, 2)} > seuil 2,50) → diènes conjugués — signe d'oxydation en cours."
+            f"🟡 **K232 hors intervalle standard** ({_fmt(k232, 2)} ; intervalle 1,5 à 3,5) → diènes conjugués — signe d'oxydation en cours."
         )
 
-    if polyphenols > 0 and polyphenols < 100:
+    if polyphenols and (polyphenols < 100 or polyphenols > 800):
         issues.append(
-            f"🟡 **Faible teneur en polyphénols** ({_fmt(polyphenols, 0)} mg/kg) → olives sur-mûres ou extraction dans de mauvaises conditions."
+            f"🟡 **Polyphénols hors intervalle standard** ({_fmt(polyphenols, 0)} mg/kg ; intervalle 100 à 800) → olives sur-mûres ou extraction dans de mauvaises conditions."
         )
 
     return issues
@@ -246,12 +247,14 @@ def _build_explanation(lot: dict, exec_rows: list[dict], labo_rows: list[dict]) 
         acid = _safe_float(r.get("acidite_huile_pourcent"))
         perox = _safe_float(r.get("indice_peroxyde_meq_o2_kg"))
         k270 = _safe_float(r.get("k270"))
-        if acid <= 0.8 and perox <= 20 and k270 <= 0.22:
+        k232 = _safe_float(r.get("k232"))
+        polyphenols = _safe_float(r.get("polyphenols_mg_kg"))
+        if 0.1 <= acid <= 5 and 5 <= perox <= 40 and 0.1 <= k270 <= 0.5 and 1.5 <= k232 <= 3.5 and 100 <= polyphenols <= 800:
             qualite_finale = "✅ **Vierge Extra** (tous les paramètres conformes)"
-        elif acid <= 2.0 and perox <= 20:
-            qualite_finale = "⚠️ **Vierge** (acidité hors norme vierge extra)"
+        elif 0.1 <= acid <= 5 and 5 <= perox <= 40:
+            qualite_finale = "⚠️ **Conforme aux intervalles standards**"
         else:
-            qualite_finale = "❌ **Lampante** (non consommable directement)"
+            qualite_finale = "❌ **Hors intervalle standard**"
 
     olive_issues = _analyse_olive_issues(lot)
     prod_issues = _analyse_production_issues(exec_rows)
@@ -363,7 +366,16 @@ class ExplicationHandler(IntentHandler):
                 "lo.id_lot",
                 "lo.reference",
                 "lo.variete",
-                "lo.fournisseur_nom",
+            ]
+            # handle fournisseur: legacy column fournisseur_nom or new relation fournisseur_id -> fournisseur.nom
+            joins = ""
+            if "fournisseur_nom" in cols:
+                base_fields.append("lo.fournisseur_nom")
+            else:
+                base_fields.append("f.nom AS fournisseur_nom")
+                joins += " LEFT JOIN fournisseur f ON f.id_fournisseur = lo.fournisseur_id"
+
+            base_fields += [
                 "lo.quantite_initiale",
                 "lo.quantite_restante",
                 "lo.date_reception",
@@ -380,7 +392,7 @@ class ExplicationHandler(IntentHandler):
                     optional_fields.append(f"lo.{f}")
 
             select_fields = base_fields + optional_fields + ["h.nom AS huilerie_nom", "h.entreprise_id"]
-            q_lot = "SELECT " + ", ".join(select_fields) + " FROM lot_olives lo JOIN huilerie h ON h.id_huilerie = lo.huilerie_id"
+            q_lot = "SELECT " + ", ".join(select_fields) + " FROM lot_olives lo JOIN huilerie h ON h.id_huilerie = lo.huilerie_id" + joins
 
             params: list[Any] = [normalized_ref, normalized_ref]
             q_lot += " WHERE (LOWER(lo.reference) = LOWER(%s) OR CAST(lo.id_lot AS CHAR) = %s)"
@@ -412,20 +424,56 @@ class ExplicationHandler(IntentHandler):
                 "ep.rendement",
             ]
             exec_optional = []
-            for ef in ["temperature_malaxage", "duree_malaxage_minutes", "presence_ajout_eau", "machine_id", "machine_id"]:
+            for ef in ["temperature_malaxage", "duree_malaxage_minutes", "presence_ajout_eau", "machine_id"]:
                 if ef in exec_cols:
                     exec_optional.append(f"ep.{ef}")
 
-            # include machine name if machine table and join possible
-            # we'll left join machine and select its name as nom_machine
-            select_exec_fields = exec_base + exec_optional + ["m.nom_machine"]
-            q_exec = "SELECT " + ", ".join(select_exec_fields) + " FROM execution_production ep LEFT JOIN machine m ON m.id_machine = ep.machine_id WHERE ep.lot_olives_id = %s ORDER BY ep.date_debut ASC"
+            # If execution_production still has machine_id use direct join, otherwise
+            # try to aggregate machine names from etape_production -> machine via guide_production
+            exec_rows = []
             try:
-                cursor.execute(q_exec, (lot_id,))
-                exec_rows = cursor.fetchall() or []
+                if "machine_id" in exec_cols:
+                    select_exec_fields = exec_base + exec_optional + ["m.nom_machine"]
+                    q_exec = "SELECT " + ", ".join(select_exec_fields) + " FROM execution_production ep LEFT JOIN machine m ON m.id_machine = ep.machine_id WHERE ep.lot_olives_id = %s ORDER BY ep.date_debut ASC"
+                    cursor.execute(q_exec, (lot_id,))
+                    exec_rows = cursor.fetchall() or []
+                else:
+                    # check etape_production exists and has machine_id
+                    try:
+                        cursor.execute("DESCRIBE etape_production")
+                        et_cols = [c["Field"] for c in (cursor.fetchall() or [])]
+                    except Exception:
+                        et_cols = []
+
+                    if "machine_id" in et_cols:
+                        # aggregate machine names used by the guide associated to each execution
+                        select_exec_fields = exec_base + exec_optional + ["GROUP_CONCAT(DISTINCT m.nom_machine SEPARATOR ', ') AS nom_machine", "ep.id_execution_production"]
+                        group_by_fields = exec_base + exec_optional + ["ep.id_execution_production"]
+                        q_exec = (
+                            "SELECT " + ", ".join(select_exec_fields)
+                            + " FROM execution_production ep"
+                            + " LEFT JOIN guide_production gp ON gp.id_guide_production = ep.guide_production_id"
+                            + " LEFT JOIN etape_production et ON et.guide_production_id = gp.id_guide_production"
+                            + " LEFT JOIN machine m ON m.id_machine = et.machine_id"
+                            + " WHERE ep.lot_olives_id = %s"
+                            + " GROUP BY " + ", ".join(group_by_fields)
+                            + " ORDER BY ep.date_debut ASC"
+                        )
+                        cursor.execute(q_exec, (lot_id,))
+                        exec_rows = cursor.fetchall() or []
+                    else:
+                        # fallback to minimal execution query if no machine info available
+                        cursor.execute(
+                            "SELECT reference, date_debut, date_fin_reelle, statut, rendement FROM execution_production WHERE lot_olives_id = %s ORDER BY date_debut ASC",
+                            (lot_id,),
+                        )
+                        exec_rows = cursor.fetchall() or []
             except Exception:
-                # fallback to minimal execution query if dynamic one fails
-                cursor.execute("SELECT reference, date_debut, date_fin_reelle, statut, rendement FROM execution_production WHERE lot_olives_id = %s ORDER BY date_debut ASC", (lot_id,))
+                # final fallback
+                cursor.execute(
+                    "SELECT reference, date_debut, date_fin_reelle, statut, rendement FROM execution_production WHERE lot_olives_id = %s ORDER BY date_debut ASC",
+                    (lot_id,),
+                )
                 exec_rows = cursor.fetchall() or []
 
             cursor.execute(SQL_LABO, (lot_id,))

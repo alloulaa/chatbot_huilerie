@@ -6,8 +6,13 @@ import re
 import logging
 from app.nlp.base import NLPAnalyzer
 from app.domain.intent import NLPResult, Intent, Period
+from app.nlp.huilerie_extractor import extract_huilerie_from_text
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_huilerie(texte: str) -> str | None:
+    return extract_huilerie_from_text(texte)
 
 
 class RegexAnalyzer(NLPAnalyzer):
@@ -52,6 +57,12 @@ class RegexAnalyzer(NLPAnalyzer):
             "fournisseur le plus", "qui livre", "performance fournisseur"
         ]):
             intention = Intent.FOURNISSEUR
+
+        elif re.search(r"\b(tous|toutes|tout)\s+les\s+machines?\b", texte) or any(m in texte for m in [
+            "liste machines", "liste des machines", "machines disponibles",
+            "quelles machines", "inventaire machines", "toutes les machines"
+        ]):
+            intention = Intent.MACHINE
         
         elif any(m in texte for m in [
             "cycle de vie", "historique lot", "parcours lot",
@@ -64,6 +75,14 @@ class RegexAnalyzer(NLPAnalyzer):
             "usage machine", "frequence machine", "machines les plus"
         ]):
             intention = Intent.MACHINES_UTILISEES
+
+        elif any(m in texte for m in [
+            "liste machines", "liste des machines", "toutes les machines",
+            "tous les machines", "quelles machines", "machines disponibles",
+            "machine en panne", "machines en panne", "hors service",
+            "etat machine", "etat des machines", "machine maintenance"
+        ]):
+            intention = Intent.MACHINE
         
         elif any(m in texte for m in [
             "liste lot", "liste des lots", "lots non conformes",
@@ -73,8 +92,11 @@ class RegexAnalyzer(NLPAnalyzer):
             intention = Intent.LOT_LISTE
         
         elif any(m in texte for m in [
-            "analyse labo", "resultat labo", "k270", "k232",
-            "polyphenol", "indice peroxyde", "analyses laboratoire"
+            "analyse labo", "analyse laboratoire", "résultats d'analyse",
+            "resultats d'analyse", "resultats analyse", "derniers resultats",
+            "k270", "k232", "polyphenol", "polyphenols",
+            "indice peroxyde", "acidité", "acidite", "acidité huile",
+            "acidite huile", "analyses laboratoire"
         ]):
             intention = Intent.ANALYSE_LABO
         
@@ -157,7 +179,7 @@ class RegexAnalyzer(NLPAnalyzer):
         return NLPResult(
             intention=intention,
             confiance=0.4,
-            huilerie=None,
+            huilerie=_extract_huilerie(message),
             periode=periode,
             type_huile=None,
             variete=None,

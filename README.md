@@ -41,6 +41,13 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+Si vous utilisez un microservice de prédiction séparé, vous pouvez préciser son URL avec :
+```bash
+export PREDICTION_API_URL=http://127.0.0.1:7500
+```
+
+Le client de prédiction utilise `http://127.0.0.1:7500` par défaut lorsque `PREDICTION_API_URL` n'est pas défini.
+
 Puis ouvrir :
 ```text
 http://127.0.0.1:8000/

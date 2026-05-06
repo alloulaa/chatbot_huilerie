@@ -14,7 +14,15 @@ class LotCycleVieHandler(IntentHandler):
     
     async def handle(self, query: ChatQuery) -> IntentResult:
         """Traiter une requête de cycle de vie d'un lot."""
-        lot_ref = query.code_lot or query.reference_lot or query.lot_reference
+        extra_context = getattr(query, "extra_context", {}) or {}
+        lot_ref = (
+            extra_context.get("lot_reference")
+            or extra_context.get("reference_lot")
+            or extra_context.get("code_lot")
+            or getattr(query, "code_lot", None)
+            or getattr(query, "reference_lot", None)
+            or getattr(query, "lot_reference", None)
+        )
         
         if not lot_ref:
             text = (

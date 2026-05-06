@@ -42,7 +42,8 @@ Structure JSON attendue :
   "campagne_annee": "annee detectee pour la campagne (ex: 2025, 2025-2026) ou null"
 }
 
-Huileries connues : zitouneya, Moulin Sfax, Moulin Sousse, Moulin Artisanal.
+Huileries connues (exemples) : zitouneya, Moulin Sfax, Moulin Sousse, Moulin Artisanal.
+Si l'utilisateur mentionne une autre huilerie, retourne ce nom tel qu'il apparaît dans le message.
 
 ================================================================================
 REGLES CRITIQUES — À RESPECTER ABSOLUMENT :
@@ -92,12 +93,12 @@ PRIORITE 5 - EXPLICATION (questions causales sur un lot SPECIFIQUE) :
 Regles de detection d'intention (ordre respecte) :
 - stock / inventaire / olives disponibles / reserve / quantite disponible    -> "stock" (SAUF si "lots"/"liste" present)
 - production / huile produite / litres produits / fabrication / extraction   -> "production"
-- machine / panne / maintenance / equipement / broyeur / etat machine        -> "machine"
+- machine / panne / en panne / maintenance / equipement / broyeur
+  / etat machine / liste machines / toutes les machines / machines en panne  -> "machine"
 - quelles machines utilisees / machine la plus utilisee / frequence machine
   / combien de fois machine / usage machine                                  -> "machines_utilisees"
 - rendement / performance / taux d'extraction / efficacite                   -> "rendement"
-- qualite / analyse / acidite / peroxyde / laboratoire / grade huile         -> "qualite"
-- pourquoi mauvaise qualite / diagnostic / cause / probleme qualite          -> "diagnostic"
+ - pourquoi mauvaise qualite / diagnostic / cause / probleme qualite          -> "diagnostic"
 - prediction / prevision / estimation future / prevoir rendement             -> "prediction"
 - reception / arrivage / pesee / livraison / bon de pesee                    -> "reception"
 - campagne / saison / annee de campagne                                      -> "campagne"
@@ -111,8 +112,9 @@ Regles de detection d'intention (ordre respecte) :
   / suivi lot / etapes du lot / que s'est-il passe pour le lot               -> "lot_cycle_vie"
 - liste des lots / lots non conformes / tracabilite lots / tous les lots
   / lots recus / lots de la periode                                          -> "lot_liste"
-- analyse laboratoire / resultats labo / k270 / k232 / polyphenols
-  / indice peroxyde / acidite huile                                          -> "analyse_labo"
+ - analyse laboratoire / resultats labo / resultats d'analyse / derniers resultats
+  / k270 / k232 / polyphenols / indice peroxyde / acidite huile               -> "analyse_labo"
+ - qualite / grade huile                                                       -> "qualite"
 - mouvement stock / transfert stock / entree stock / sortie stock
   / ajustement stock / historique stock                                      -> "mouvement_stock"
 - Sinon                                                                      -> "inconnu"
