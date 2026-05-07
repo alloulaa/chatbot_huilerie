@@ -51,19 +51,26 @@ class RegexAnalyzer(NLPAnalyzer):
         ]):
             intention = Intent.COMPARAISON
         
-        # Intents spécifiques EN PREMIER (avant stock/production génériques)
-        if any(m in texte for m in [
+        # Intents spécifiques EN PREMIER (après COMPARAISON)
+        # Machine list detection FIRST: "quelles sont les machines", "quelles machines", etc.
+        elif (any(re.search(rf"\b{m}\b", texte) for m in ["quelles", "quels"]) and 
+            any(re.search(r"\bmachines?\b", texte)) and 
+            not any(m in texte for m in ["utilisees", "la plus utilisee", "frequence", "les plus"])):
+            # "quelles machines", "quelles sont les machines", "quels machines" etc.
+            intention = Intent.MACHINE
+        
+        elif re.search(r"\b(tous|toutes|tout)\s+les\s+machines?\b", texte) or any(m in texte for m in [
+            "liste machines", "liste des machines", "machines disponibles",
+            "inventaire machines", "toutes les machines"
+        ]):
+            intention = Intent.MACHINE
+        
+        elif any(m in texte for m in [
             "meilleur fournisseur", "classement fournisseur", "top fournisseur",
             "fournisseur le plus", "qui livre", "performance fournisseur"
         ]):
             intention = Intent.FOURNISSEUR
 
-        elif re.search(r"\b(tous|toutes|tout)\s+les\s+machines?\b", texte) or any(m in texte for m in [
-            "liste machines", "liste des machines", "machines disponibles",
-            "quelles machines", "inventaire machines", "toutes les machines"
-        ]):
-            intention = Intent.MACHINE
-        
         elif any(m in texte for m in [
             "cycle de vie", "historique lot", "parcours lot",
             "suivi lot", "etapes lot", "cycle lot"
@@ -77,8 +84,6 @@ class RegexAnalyzer(NLPAnalyzer):
             intention = Intent.MACHINES_UTILISEES
 
         elif any(m in texte for m in [
-            "liste machines", "liste des machines", "toutes les machines",
-            "tous les machines", "quelles machines", "machines disponibles",
             "machine en panne", "machines en panne", "hors service",
             "etat machine", "etat des machines", "machine maintenance"
         ]):

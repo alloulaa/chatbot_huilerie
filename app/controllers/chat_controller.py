@@ -20,6 +20,7 @@ from app.services.permission_service import (
 )
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatbotService()
 
@@ -278,6 +279,7 @@ def _annotate_machines(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for idx, r in enumerate(rows, start=1):
         nom: str = r.get("nomMachine") or r.get("nom_machine") or "Machine inconnue"
         ref: str = r.get("machineRef") or r.get("machine_ref") or "N/D"
+        etat: str = r.get("etatMachine") or r.get("etat_machine") or r.get("etat") or "INCONNU"
         nb_exec: int = int(_safe_float(r.get("nbExecutions") or r.get("nb_executions"), 0))
         rend_moy: float = _safe_float(r.get("rendementMoyen") or r.get("rendement_moyen"), 0.0)
         total_prod: float = _safe_float(r.get("totalProduit") or r.get("total_produit"), 0.0)
@@ -286,6 +288,7 @@ def _annotate_machines(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         nr["rang"] = idx
         nr["nomMachine"] = nom
         nr["machineRef"] = ref
+        nr["etatMachine"] = etat
         nr["nbExecutions"] = nb_exec
         nr["rendementMoyen"] = rend_moy
         nr["totalProduit"] = total_prod
@@ -319,6 +322,7 @@ def _build_machines_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
             "name": nom,
             "nomMachine": nom,
             "machineRef": r.get("machineRef", "N/D"),
+            "etatMachine": r.get("etatMachine", "INCONNU"),
             "nbExecutions": nb_exec,
             "rendementMoyen": rend_moy,
             "totalProduit": total_prod,
@@ -742,11 +746,21 @@ def _build_response(
     # Special handling for structured ranking intents
     ranking_intents = {"fournisseur", "machines_utilisees", "lot_liste", "analyse_labo"}
 
-    # Machine list/status requests are not ranking queries: return text + structured data directly.
-    if intent == "machine" and isinstance(response_data, list) and response_data:
-        annotated = _annotate_machines(response_data)
-        structured_payload = _build_machines_payload(annotated)
+    # Machine list/status requests: always return stable structure (text + structured data).
+    if intent == "machine":
         ctx.pop("pending_visualization", None)
+        if isinstance(response_data, list) and response_data:
+            # Has data: annotate and structure
+            annotated = _annotate_machines(response_data)
+            structured_payload = _build_machines_payload(annotated)
+        else:
+            # No data: return empty structure with same format
+            structured_payload = {
+                "machines": [],
+                "labels": [],
+                "datasets": []
+            }
+        
         return ChatResponse(
             type="text",
             message=response_text,
@@ -754,9 +768,12 @@ def _build_response(
             confidence=confidence,
             entities=entities,
             response=response_text,
+            options=[],
+            chart_type=None,
             data=structured_payload,
             applied_scope=applied_scope,
             applied_permissions=applied_permissions,
+            pending_choice=False,
         )
 
     if intent in ranking_intents and isinstance(response_data, list) and response_data:
@@ -952,19 +969,32 @@ async def ask_chatbot(
 
     # ── NLP ──────────────────────────────────────────────────────────────────
     resultat = await analyser_message(payload.message)
+    logger.debug("NLP raw result: %s", resultat)
     intent = str(resultat.get("intention") or "inconnu").strip().lower()
     message_lower = payload.message.lower().strip()
+    logger.debug("Parsed intent='%s', extracted huilerie='%s', message='%s'", intent, resultat.get("huilerie"), payload.message)
+    
+    # Override: detect machine list requests flexibly
+    # "quelles sont les machines", "quels machines", "liste machines", etc.
+    import re
     machine_use_keywords = [
         "machines les plus", "machine la plus", "frequence machine",
         "usage machine", "machines utilisees", "machines utilisées",
     ]
-    machine_list_keywords = [
-        "liste machines", "liste des machines", "toutes les machines",
-        "tous les machines", "quelles machines", "machines disponibles",
-        "inventaire machines",
-    ]
-    if any(k in message_lower for k in machine_list_keywords) and not any(k in message_lower for k in machine_use_keywords):
+    is_flexible_machine_list = (
+        (any(re.search(rf"\b{m}\b", message_lower) for m in ["quelles", "quels"]) and 
+         re.search(r"\bmachines?\b", message_lower) and
+         not any(k in message_lower for k in machine_use_keywords))
+        or any(k in message_lower for k in [
+            "liste machines", "liste des machines", "toutes les machines",
+            "tous les machines", "machines disponibles", "inventaire machines",
+        ])
+    )
+    
+    # If we detect a machine list pattern, override to 'machine' intent
+    if is_flexible_machine_list:
         intent = "machine"
+    
     try:
         confidence = float(resultat.get("confiance", 0.5))
     except (TypeError, ValueError):
@@ -1086,7 +1116,6 @@ async def ask_chatbot(
             response_data = _build_stock_payload(annotated)
             lines = [f"- {r['variete']} : **{r['stock_str']}**" for r in annotated]
             response_text = f"Stock {scope_text} :\n" + "\n".join(lines) + ctx_note
-        response_data = rows
 
     # --- PRODUCTION ----------------------------------------------------------
     elif intent == "production":
@@ -1100,38 +1129,26 @@ async def ask_chatbot(
 
     # --- MACHINE — état ------------------------------------------------------
     elif intent == "machine":
-        is_list_request = any(word in message_lower for word in [
-            "liste", "toutes", "tous", "toutes les", "tous les",
-            "quelles machines", "machines disponibles", "inventaire machines",
-        ])
         is_panne_request = any(word in message_lower for word in ["en panne", "panne", "hors service"])
 
-        if is_list_request and not is_panne_request:
+        if not is_panne_request:
             result = service.get_all_machines(huilerie, user_enterprise_id)
             rows = result.get("value") or []
             if not rows:
                 response_text = f"Aucune machine trouvée {scope_text}.{ctx_note}"
             else:
-                if huilerie:
-                    lines = [
-                        f"- **{r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')}** : {r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'EN SERVICE')}"
-                        for r in rows
-                    ]
-                    response_text = f"Machines de l'huilerie {huilerie} :\n" + "\n".join(lines) + ctx_note
-                else:
-                    sections: dict[str, list[dict[str, Any]]] = {}
-                    for row in rows:
-                        huilerie_name = row.get("huilerie") or "Huilerie inconnue"
-                        sections.setdefault(huilerie_name, []).append(row)
-                    formatted_sections = []
-                    for huilerie_name, machines in sections.items():
-                        lines = [f"**{huilerie_name}**:"]
-                        lines.extend(
-                            f"  - {r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')} : {r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'EN SERVICE')}"
-                            for r in machines
-                        )
-                        formatted_sections.append("\n".join(lines))
-                    response_text = "Liste des machines :\n\n" + "\n\n".join(formatted_sections) + ctx_note
+                header = f"Machines de l'huilerie {huilerie}" if huilerie else "Liste des machines"
+                lines = []
+                for r in rows:
+                    nom = r.get("nomMachine") or r.get("nom_machine") or r.get("nom") or "Machine inconnue"
+                    categorie = r.get("categorieMachine") or r.get("categorie_machine") or "Inconnue"
+                    type_machine = r.get("typeMachine") or r.get("type_machine") or "Inconnu"
+                    nb_executions = r.get("nbExecutions") or r.get("nb_executions") or 0
+                    etat_machine = r.get("etatMachine") or r.get("etat_machine") or r.get("etat") or "INCONNU"
+                    lines.append(
+                        f"- **{nom}** | catégorie: {categorie} | type: {type_machine} | exécutions: {nb_executions} | état: {etat_machine}"
+                    )
+                response_text = header + " :\n" + "\n".join(lines) + ctx_note
             response_data = rows
         else:
             result = service.get_machines(
@@ -1161,7 +1178,9 @@ async def ask_chatbot(
 
     # --- MACHINES LES PLUS UTILISÉES -----------------------------------------
     elif intent == "machines_utilisees":
-        result = service.get_machines_utilisees(huilerie, start_date, end_date, user_enterprise_id)
+        query_start_date = start_date if entities.get("periode") else None
+        query_end_date = end_date if entities.get("periode") else None
+        result = service.get_machines_utilisees(huilerie, query_start_date, query_end_date, user_enterprise_id)
         rows = result.get("value") or []
         if not rows:
             response_text = f"Aucune donnée d'utilisation machines {scope_text}.{ctx_note}"

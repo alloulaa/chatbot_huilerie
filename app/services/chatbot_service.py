@@ -91,6 +91,7 @@ class ChatbotService:
         try:
             connection = get_db_connection()
             cursor = connection.cursor(dictionary=True)
+            logger.debug("get_all_machines: executing query=%s params=%s", query, tuple(params))
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 
@@ -164,9 +165,27 @@ class ChatbotService:
     ) -> dict[str, Any]:
         """Get all machines (not just problematic ones) for listing purposes."""
         query = """
-            SELECT DISTINCT m.nom_machine, m.etat_machine, m.reference, m.capacite, h.nom AS huilerie_nom
+            SELECT
+                m.nom_machine,
+                m.categorie_machine,
+                m.type_machine,
+                m.etat_machine,
+                COALESCE(u.nb_executions, 0) AS nb_executions,
+                h.nom AS huilerie_nom
             FROM machine m
             JOIN huilerie h ON h.id_huilerie = m.huilerie_id
+            LEFT JOIN (
+                SELECT
+                    et.machine_id,
+                    COUNT(DISTINCT ep.id_execution_production) AS nb_executions
+                FROM etape_production et
+                JOIN guide_production gp ON gp.id_guide_production = et.guide_production_id
+                JOIN execution_production ep ON ep.guide_production_id = gp.id_guide_production
+                JOIN lot_olives lo ON lo.id_lot = ep.lot_olives_id
+                JOIN huilerie h2 ON h2.id_huilerie = lo.huilerie_id
+                WHERE et.machine_id IS NOT NULL
+                GROUP BY et.machine_id
+            ) u ON u.machine_id = m.id_machine
             WHERE 1=1
         """
         params: list[Any] = []
@@ -194,18 +213,14 @@ class ChatbotService:
                     or row.get("machine")
                     or "Machine inconnue"
                 )
-                machine_state = (
-                    row.get("etat_machine")
-                    or row.get("etatMachine")
-                    or row.get("probleme")
-                    or row.get("etat")
-                    or "EN SERVICE"
-                )
                 huilerie_nom = row.get("huilerie_nom") or "Huilerie inconnue"
                 
                 normalized.append({
                     "nomMachine": machine_name, 
-                    "etatMachine": machine_state,
+                    "categorieMachine": row.get("categorie_machine") or row.get("categorieMachine") or "Inconnue",
+                    "typeMachine": row.get("type_machine") or row.get("typeMachine") or "Inconnu",
+                    "nbExecutions": int(row.get("nb_executions") or row.get("nbExecutions") or 0),
+                    "etatMachine": row.get("etat_machine") or row.get("etatMachine") or "INCONNU",
                     "huilerie": huilerie_nom
                 })
 
@@ -243,7 +258,7 @@ class ChatbotService:
             query += " AND LOWER(COALESCE(m.etat_machine, 'en service')) = %s"
             params.append(normalized_status)
         else:
-            query += " AND LOWER(COALESCE(m.etat_machine, 'en service')) IN ('maintenance', 'surveillance', 'en panne', 'panne')"
+            query += " AND LOWER(COALESCE(m.etat_machine, '')) IN ('maintenance', 'en_service', 'desactivee', 'surveillance')"
 
         if enterprise_id is not None:
             query += " AND h.entreprise_id = %s"
@@ -340,12 +355,6 @@ class ChatbotService:
         query += " WHERE 1=1"
 
         outer_params: list[Any] = []
-        if enterprise_id is not None:
-            query += " AND h.entreprise_id = %s"
-            outer_params.append(enterprise_id)
-        if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
-            outer_params.append(huilerie)
         query += " ORDER BY m.nom_machine ASC"
 
         params: list[Any] = subquery_params + outer_params
@@ -1106,10 +1115,8 @@ class ChatbotService:
                 sm.commentaire,
                 lo.reference AS lot_ref,
                 lo.variete,
-                s.reference AS stock_reference,
                 h.nom AS huilerie_nom
             FROM stock_movement sm
-            JOIN stock s ON s.id_stock = sm.stock_id
             JOIN lot_olives lo ON lo.id_lot = sm.lot_id
             JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
             WHERE 1=1
@@ -1144,7 +1151,6 @@ class ChatbotService:
                         "commentaire": row.get("commentaire"),
                         "lot_ref": row.get("lot_ref"),
                         "variete": row.get("variete"),
-                        "stock_reference": row.get("stock_reference"),
                         "huilerie_nom": row.get("huilerie_nom"),
                     }
                 )

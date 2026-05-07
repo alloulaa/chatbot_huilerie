@@ -1,6 +1,9 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 from app.controllers.chat_controller import router as chat_router
 
