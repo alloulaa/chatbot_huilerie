@@ -750,16 +750,25 @@ def _build_response(
     if intent == "machine":
         ctx.pop("pending_visualization", None)
         if isinstance(response_data, list) and response_data:
-            # Has data: annotate and structure
-            annotated = _annotate_machines(response_data)
-            structured_payload = _build_machines_payload(annotated)
+            # Has data: build simple structure with just machines
+            machines: list[dict[str, Any]] = []
+            for r in response_data:
+                nom = r.get("nomMachine") or r.get("nom_machine") or r.get("nom") or "Machine inconnue"
+                categorie = r.get("categorieMachine") or r.get("categorie_machine") or "Inconnue"
+                type_machine = r.get("typeMachine") or r.get("type_machine") or "Inconnu"
+                nb_executions = r.get("nbExecutions") or r.get("nb_executions") or 0
+                
+                machines.append({
+                    "nomMachine": nom,
+                    "categorieMachine": categorie,
+                    "typeMachine": type_machine,
+                    "nbExecutions": nb_executions,
+                })
+            
+            structured_payload = {"machines": machines}
         else:
-            # No data: return empty structure with same format
-            structured_payload = {
-                "machines": [],
-                "labels": [],
-                "datasets": []
-            }
+            # No data: return empty structure
+            structured_payload = {"machines": []}
         
         return ChatResponse(
             type="text",

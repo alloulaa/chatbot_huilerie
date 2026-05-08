@@ -90,13 +90,31 @@ PRIORITE 5 - EXPLICATION (questions causales sur un lot SPECIFIQUE) :
     - "diagnostic"   (analyse agregee sur une periode, pas un lot precis)
     - "analyse_labo" (liste brute des resultats, pas d'explication)
 
+PRIORITE 6 - MACHINE vs MACHINES_UTILISEES (distinction critique) :
+- MACHINE : si demande une LISTE ou un INVENTAIRE de machines (quelle machines existent, quelles sont les machines, état, panne, maintenance)
+  Exemples :
+    "quelles sont les machines de ma3sra ?"       -> MACHINE
+    "liste des machines"                           -> MACHINE
+    "machines en panne"                            -> MACHINE
+    "machines de cette huilerie"                   -> MACHINE
+  → TOUJOURS "machine"
+- MACHINES_UTILISEES : si demande l'USAGE, la FREQUENCE, ou combien de fois utilisées
+  Exemples :
+    "quelles machines ont été utilisées ?"         -> MACHINES_UTILISEES
+    "machine la plus utilisée"                     -> MACHINES_UTILISEES
+    "combien de fois utilisée chaque machine ?"    -> MACHINES_UTILISEES
+  → TOUJOURS "machines_utilisees"
+
+
 Regles de detection d'intention (ordre respecte) :
 - stock / inventaire / olives disponibles / reserve / quantite disponible    -> "stock" (SAUF si "lots"/"liste" present)
 - production / huile produite / litres produits / fabrication / extraction   -> "production"
 - machine / panne / en panne / maintenance / equipement / broyeur
-  / etat machine / liste machines / toutes les machines / machines en panne  -> "machine"
-- quelles machines utilisees / machine la plus utilisee / frequence machine
-  / combien de fois machine / usage machine                                  -> "machines_utilisees"
+  / etat machine / liste machines / toutes les machines / machines en panne
+  / quelles sont les machines / machines de [location] / machines [huilerie]  -> "machine"
+- quelles machines ont ete utilisees / machine la plus utilisee / frequence machine
+  / combien de fois machine / usage machine / machines utilisees pour
+  (SEULEMENT si la question porte sur l'USAGE ou la FREQUENCE, pas sur la liste)  -> "machines_utilisees"
 - rendement / performance / taux d'extraction / efficacite                   -> "rendement"
  - pourquoi mauvaise qualite / diagnostic / cause / probleme qualite          -> "diagnostic"
 - prediction / prevision / estimation future / prevoir rendement             -> "prediction"
