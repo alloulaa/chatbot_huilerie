@@ -71,6 +71,7 @@ def _build_fournisseur_payload(annotated: list[dict[str, Any]]) -> dict[str, Any
 
     return {
         "suppliers": suppliers,
+        "items": suppliers,
         "labels": labels,
         "datasets": [
             {"label": "Quantité totale (kg)", "data": ds_kg, "type": "bar"},
@@ -140,6 +141,7 @@ def _build_machines_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "machines": machines,
+        "items": machines,
         "labels": labels,
         "datasets": [
             {"label": "Exécutions", "data": ds_exec, "type": "bar"},
@@ -196,6 +198,7 @@ def _build_lots_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "lots": lots,
+        "items": lots,
         "labels": labels,
         "datasets": [{"label": "Quantité (kg)", "data": ds_qte, "type": "bar"}],
     }
@@ -264,6 +267,7 @@ def _build_analyses_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "analyses": analyses,
+        "items": analyses,
         "labels": labels,
         "datasets": [
             {"label": "Acidité (%)", "data": ds_acid, "type": "bar"},
@@ -461,6 +465,7 @@ def build_chat_response(
     if selected_choice and pending:
         chart_data = pending.get("chart_data") or []
         chart_type = pending.get("chart_type") or "bar"
+        raw_data = pending.get("raw_data") or {}
 
         if selected_choice == "texte":
             session_service.clear_pending_visualization(session_id)
@@ -473,7 +478,7 @@ def build_chat_response(
                 confidence=confidence,
                 entities=entities,
                 response=text_message,
-                data=pending.get("raw_data"),
+                data=raw_data,
                 applied_scope=applied_scope,
                 applied_permissions=applied_permissions,
                 selected_option="texte",
@@ -481,6 +486,9 @@ def build_chat_response(
 
         if selected_choice == "graphique":
             session_service.clear_pending_visualization(session_id)
+            # Inclure les items dans le chart_data pour le frontend
+            items = raw_data.get("items", [])
+            chart_data_with_items = {**chart_data, "items": items}
             return ChatResponse(
                 type="chart",
                 message="Voici la visualisation demandée.",
@@ -489,7 +497,7 @@ def build_chat_response(
                 entities=entities,
                 response="Voici la visualisation demandée.",
                 chart_type=chart_type,
-                data=chart_data,
+                data=chart_data_with_items,
                 applied_scope=applied_scope,
                 applied_permissions=applied_permissions,
                 selected_option="graphique",
