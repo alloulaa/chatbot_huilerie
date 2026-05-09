@@ -16,14 +16,16 @@ class MachineHandler(IntentHandler):
         """Traiter une requÃªte d'Ã©tat de machines."""
         # Check if user is asking for a complete list vs status/issues
         message_lower = query.message.lower()
-        is_list_request = any(word in message_lower for word in [
-            "liste", "toutes", "tous", "toutes les", "tous les", 
+        is_panne_request = any(word in message_lower for word in [
+            "en panne", "panne", "hors service", "maintenance"
+        ])
+        is_list_request = (not is_panne_request) and any(word in message_lower for word in [
+            "liste", "toutes", "tous", "toutes les", "tous les",
             "quelles machines", "machines disponibles", "inventaire machines"
         ])
-        is_panne_request = any(word in message_lower for word in [
-            "en panne", "panne", "hors service"
-        ])
         requested_status = "maintenance" if is_panne_request else None
+        query_start_date = query.start_date if query.explicit_period else None
+        query_end_date = query.end_date if query.explicit_period else None
         
         if is_list_request:
             # Return complete list of machines
@@ -67,8 +69,8 @@ class MachineHandler(IntentHandler):
             # Return machines with issues (original behavior)
             result = self.service.get_machines(
                 query.huilerie,
-                query.start_date,
-                query.end_date,
+                query_start_date,
+                query_end_date,
                 query.enterprise_id,
                 status_filter=requested_status,
             )

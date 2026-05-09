@@ -14,7 +14,14 @@ class MouvementStockHandler(IntentHandler):
     
     async def handle(self, query: ChatQuery) -> IntentResult:
         """Traiter une requÃªte de mouvement de stock."""
-        result = self.service.get_mouvements_stock(query.huilerie, query.start_date, query.end_date, query.enterprise_id)
+        query_start_date = query.start_date if query.explicit_period else None
+        query_end_date = query.end_date if query.explicit_period else None
+        result = self.service.get_mouvements_stock(
+            query.huilerie,
+            query_start_date,
+            query_end_date,
+            query.enterprise_id,
+        )
         rows = result.get("value") or []
         
         if not rows:

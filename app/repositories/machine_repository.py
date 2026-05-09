@@ -106,6 +106,11 @@ class MachineRepository:
         normalized_status = status_filter.strip().lower() if status_filter else None
         if normalized_status in {"panne", "en panne"}:
             normalized_status = "maintenance"
+        normalized_status_value = (
+            normalized_status.replace("_", " ").replace("-", " ").strip()
+            if normalized_status
+            else None
+        )
 
         query = """
             SELECT DISTINCT m.nom_machine, m.etat_machine, m.reference, m.capacite
@@ -115,10 +120,12 @@ class MachineRepository:
         """
         params: list[Any] = []
         if normalized_status:
-            query += " AND LOWER(COALESCE(m.etat_machine, 'en service')) = %s"
-            params.append(normalized_status)
-        else:
-            query += " AND LOWER(COALESCE(m.etat_machine, '')) IN ('maintenance', 'en_service', 'desactivee', 'surveillance')"
+            state_expr = "REPLACE(REPLACE(LOWER(COALESCE(m.etat_machine, '')), '_', ' '), '-', ' ')"
+            if normalized_status == "maintenance":
+                query += f" AND {state_expr} IN ('maintenance', 'en maintenance')"
+            else:
+                query += f" AND {state_expr} = %s"
+                params.append(normalized_status_value)
 
         if enterprise_id is not None:
             query += " AND h.entreprise_id = %s"
@@ -211,9 +218,16 @@ class MachineRepository:
             query += " AND " + " AND ".join(subquery_filters)
         query += " GROUP BY et.machine_id ) u ON u.machine_id = m.id_machine"
         query += " WHERE 1=1"
+        outer_params: list[Any] = []
+        if enterprise_id is not None:
+            query += " AND h.entreprise_id = %s"
+            outer_params.append(enterprise_id)
+        if huilerie:
+            query += " AND LOWER(h.nom) = LOWER(%s)"
+            outer_params.append(huilerie)
         query += " ORDER BY m.nom_machine ASC"
 
-        params: list[Any] = subquery_params
+        params: list[Any] = subquery_params + outer_params
 
         connection = None
         cursor = None

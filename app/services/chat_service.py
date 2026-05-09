@@ -32,6 +32,13 @@ from app.nlp.normalizer import resolve_period
 
 logger = logging.getLogger(__name__)
 
+_GENERIC_HUILERIE_TERMS = {
+    "ma3sra",
+    "maasra",
+    "huilerie",
+    "moulin",
+}
+
 
 
 
@@ -87,7 +94,11 @@ class ChatService:
         # Step 1: NLP Analysis
         nlp_result = await self.nlp.analyze(message)
         intent = nlp_result.intention
-        resolved_huilerie = nlp_result.huilerie or extract_huilerie_from_text(message) or huilerie
+        extracted_huilerie = nlp_result.huilerie or extract_huilerie_from_text(message)
+        if extracted_huilerie and huilerie and str(extracted_huilerie).strip().lower() in _GENERIC_HUILERIE_TERMS:
+            resolved_huilerie = huilerie
+        else:
+            resolved_huilerie = extracted_huilerie or huilerie
         
         logger.info(f"NLP result: intent={intent}, confidence={nlp_result.confiance}")
         
@@ -112,8 +123,15 @@ class ChatService:
         # Step 5: Resolve dates
         period_label = nlp_result.periode.value if nlp_result.periode else "aujourd_hui"
         start_date, end_date, period_text = resolve_period(period_label)
+
+        # Step 6: Merge NLP entities into extra_context for intent handlers.
+        context_data = dict(extra_context or {})
+        context_data["lot_reference"] = nlp_result.lot_reference
+        context_data["reference_lot"] = nlp_result.reference_lot
+        context_data["code_lot"] = nlp_result.code_lot
+        context_data["campagne_annee"] = nlp_result.campagne_annee
         
-        # Step 6: Build ChatQuery
+        # Step 7: Build ChatQuery
         query = ChatQuery.from_raw(
             message=message,
             session_id=session_id,
@@ -126,10 +144,10 @@ class ChatService:
             explicit_period=explicit_period,
             start_date=start_date,
             end_date=end_date,
-            extra_context=extra_context or {},
+            extra_context=context_data,
         )
         
-        # Step 7: Dispatch to Handler
+        # Step 8: Dispatch to Handler
         try:
             handler = self._handlers.get(intent)
             if handler:
@@ -147,7 +165,7 @@ class ChatService:
                 structured_payload={"error": str(error)}
             )
         
-        # Step 8: Build response
+        # Step 9: Build response
         # Exposer aussi les entitÃ©s extraites par le NLP pour compatibilitÃ©
         entities = {
             "huilerie": resolved_huilerie,

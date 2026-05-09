@@ -35,9 +35,12 @@ class RegexAnalyzer(NLPAnalyzer):
         has_causal = any(m in texte for m in [
             "pourquoi", "explique", "expliquer", "cause", "raison",
             "qu'est-ce qui", "qu est-ce qui", "analyser", "analyse le lot",
-            "comment expliquer",
+            "comment expliquer", "pk", "prk", "pourkoi", "pour koi",
         ])
-        if has_lot_ref and has_causal:
+        has_quality_judgement = any(m in texte for m in [
+            "mauvaise", "mauvais", "bon", "bonne", "faible", "eleve", "élevé",
+        ])
+        if has_lot_ref and (has_causal or has_quality_judgement):
             intention = Intent.EXPLICATION
         
         # --- COMPARAISON (avant campagne et fournisseur) ---

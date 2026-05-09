@@ -370,37 +370,44 @@ class LotRepository:
         end_date: str | None = None,
         enterprise_id: int | None = None,
     ) -> dict[str, Any]:
-        query = """
-            SELECT
-                sm.reference,
-                sm.date_mouvement,
-                sm.type_mouvement,
-                sm.commentaire,
-                lo.reference AS lot_ref,
-                lo.variete,
-                h.nom AS huilerie_nom
-            FROM stock_movement sm
-            JOIN lot_olives lo ON lo.id_lot = sm.lot_id
-            JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
-            WHERE 1=1
-        """
-        params: list[Any] = []
-        if enterprise_id is not None:
-            query += " AND h.entreprise_id = %s"
-            params.append(enterprise_id)
-        if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
-            params.append(huilerie)
-        if start_date and end_date:
-            query += " AND sm.date_mouvement BETWEEN %s AND %s"
-            params.extend([start_date, end_date])
-        query += " ORDER BY sm.date_mouvement DESC, sm.id_stock_movement DESC"
-
         connection = None
         cursor = None
         try:
             connection = self._get_db_connection()
             cursor = connection.cursor(dictionary=True)
+
+            table_name = "stock_movement"
+            try:
+                cursor.execute("SELECT 1 FROM stock_movement LIMIT 1")
+            except Exception:
+                table_name = "mouvement_stock"
+
+            query = f"""
+                SELECT
+                    sm.reference,
+                    sm.date_mouvement,
+                    sm.type_mouvement,
+                    sm.commentaire,
+                    lo.reference AS lot_ref,
+                    lo.variete,
+                    h.nom AS huilerie_nom
+                FROM {table_name} sm
+                JOIN lot_olives lo ON lo.id_lot = sm.lot_id
+                JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
+                WHERE 1=1
+            """
+            params: list[Any] = []
+            if enterprise_id is not None:
+                query += " AND h.entreprise_id = %s"
+                params.append(enterprise_id)
+            if huilerie:
+                query += " AND LOWER(h.nom) = LOWER(%s)"
+                params.append(huilerie)
+            if start_date and end_date:
+                query += " AND sm.date_mouvement BETWEEN %s AND %s"
+                params.extend([start_date, end_date])
+            query += " ORDER BY sm.date_mouvement DESC"
+
             cursor.execute(query, tuple(params))
             rows = cursor.fetchall() or []
 

@@ -14,6 +14,7 @@ Ce handler est distinct des intents existants :
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from app.database import get_db_connection
@@ -56,6 +57,20 @@ def _fmt(value: Any, decimals: int = 2) -> str:
         return f"{_safe_float(value):,.{decimals}f}".replace(",", " ")
     except Exception:
         return str(value or "N/D")
+
+
+def _normalize_lot_reference(text: str | None) -> str | None:
+    if not text:
+        return None
+    t = str(text).strip().upper()
+    if re.fullmatch(r"LO\d+", t):
+        return f"LO{int(t[2:]):02d}"
+    match = re.fullmatch(r"(?:LOT|L)\s*(\d+)", t)
+    if match:
+        return f"LO{int(match.group(1)):02d}"
+    if re.fullmatch(r"\d+", t):
+        return f"LO{int(t):02d}"
+    return t
 
 
 SQL_LOT = """
@@ -234,7 +249,12 @@ def _analyse_production_issues(exec_rows: list[dict]) -> list[str]:
     return issues
 
 
-def _build_explanation(lot: dict, exec_rows: list[dict], labo_rows: list[dict]) -> str:
+def _build_explanation(
+    lot: dict,
+    exec_rows: list[dict],
+    labo_rows: list[dict],
+    asks_good_yield: bool = False,
+) -> str:
     lot_ref = lot.get("reference", "?")
     variete = lot.get("variete") or "variÃ©tÃ© inconnue"
     fournisseur = lot.get("fournisseur_nom") or "fournisseur inconnu"
@@ -306,9 +326,27 @@ def _build_explanation(lot: dict, exec_rows: list[dict], labo_rows: list[dict]) 
             + "."
         )
     else:
-        lines.append(
-            "### ðŸ”Ž Conclusion\nAucun facteur critique, mais des points d'amÃ©lioration ont Ã©tÃ© dÃ©tectÃ©s (signalÃ©s en ðŸŸ¡)."
-        )
+        rendements = [
+            _safe_float(ep.get("rendement"))
+            for ep in exec_rows
+            if _safe_float(ep.get("rendement")) > 0
+        ]
+        has_low_yield = any(r < RENDEMENT_MIN_NORMAL for r in rendements)
+        normal_yields = [
+            r
+            for r in rendements
+            if RENDEMENT_MIN_NORMAL <= r <= RENDEMENT_MAX_NORMAL
+        ]
+
+        if asks_good_yield and normal_yields and not has_low_yield:
+            avg_yield = sum(normal_yields) / len(normal_yields)
+            lines.append(
+                f"### ðŸ”Ž Conclusion\nLe rendement est globalement bon pour ce lot (moyenne observÃ©e : {_fmt(avg_yield, 1)} %), et aucun facteur critique n'a Ã©tÃ© dÃ©tectÃ©."
+            )
+        else:
+            lines.append(
+                "### ðŸ”Ž Conclusion\nAucun facteur critique, mais des points d'amÃ©lioration ont Ã©tÃ© dÃ©tectÃ©s (signalÃ©s en ðŸŸ¡)."
+            )
 
     return "\n".join(lines)
 
@@ -320,10 +358,18 @@ class ExplicationHandler(IntentHandler):
         self.service = service
 
     async def handle(self, query: ChatQuery) -> IntentResult:
+        message_lower = (query.message or "").lower()
+        asks_good_yield = (
+            "rendement" in message_lower
+            and any(token in message_lower for token in ["bon", "bonne", "correct", "eleve", "Ã©levÃ©"])
+        )
+
         lot_ref = (
             query.extra_context.get("lot_reference")
+            or query.extra_context.get("reference_lot")
             or query.extra_context.get("code_lot")
             or getattr(query, "lot_reference", None)
+            or getattr(query, "reference_lot", None)
             or getattr(query, "code_lot", None)
         )
 
@@ -341,7 +387,7 @@ class ExplicationHandler(IntentHandler):
                 structured_payload=None,
             )
 
-        normalized_ref = self.service._normalize_lot_reference(lot_ref)
+        normalized_ref = _normalize_lot_reference(lot_ref)
         if not normalized_ref:
             return IntentResult(
                 text=f"RÃ©fÃ©rence de lot invalide : **{lot_ref}**.",
@@ -492,7 +538,12 @@ class ExplicationHandler(IntentHandler):
             if connection and connection.is_connected():
                 connection.close()
 
-        explanation = _build_explanation(lot_row, exec_rows, labo_rows)
+        explanation = _build_explanation(
+            lot_row,
+            exec_rows,
+            labo_rows,
+            asks_good_yield=asks_good_yield,
+        )
 
         chart_data = None
         if labo_rows:
