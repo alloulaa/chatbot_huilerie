@@ -1,9 +1,9 @@
-"""
+﻿"""
 Handler pour l'intent CAMPAGNE.
 """
 from app.services.intent.base import IntentHandler
 from app.domain.chat import ChatQuery, IntentResult
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 
 
 def _fmt(value: float, decimals: int = 2) -> str:
@@ -14,19 +14,19 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class CampagneHandler(IntentHandler):
-    """Handler pour traiter les requêtes sur les campagnes."""
+    """Handler pour traiter les requÃªtes sur les campagnes."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requête de campagne."""
+        """Traiter une requÃªte de campagne."""
         annee = query.campagne_annee
         result = self.service.get_campagnes(query.huilerie, query.enterprise_id, annee)
         rows = result.get("value") or []
         
         if not rows:
-            text = "Aucune campagne trouvée."
+            text = "Aucune campagne trouvÃ©e."
             return IntentResult(text=text, data=[], structured_payload=None)
         
         lines = []
@@ -41,3 +41,4 @@ class CampagneHandler(IntentHandler):
         
         text = "Campagnes :\n" + "\n".join(lines)
         return IntentResult(text=text, data=rows, structured_payload=None)
+

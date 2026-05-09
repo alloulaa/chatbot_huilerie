@@ -54,7 +54,7 @@ class RegexAnalyzer(NLPAnalyzer):
         # Intents spécifiques EN PREMIER (après COMPARAISON)
         # Machine list detection FIRST: "quelles sont les machines", "quelles machines", etc.
         elif (any(re.search(rf"\b{m}\b", texte) for m in ["quelles", "quels"]) and 
-            any(re.search(r"\bmachines?\b", texte)) and 
+            bool(re.search(r"\bmachines?\b", texte)) and
             not any(m in texte for m in ["utilisees", "la plus utilisee", "frequence", "les plus"])):
             # "quelles machines", "quelles sont les machines", "quels machines" etc.
             intention = Intent.MACHINE

@@ -1,9 +1,9 @@
-"""
+﻿"""
 Handler pour l'intent STOCK.
 """
 from app.services.intent.base import IntentHandler
 from app.domain.chat import ChatQuery, IntentResult
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 
 
 def _fmt(value: float, decimals: int = 2) -> str:
@@ -14,13 +14,13 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class StockHandler(IntentHandler):
-    """Handler pour traiter les requêtes sur le stock."""
+    """Handler pour traiter les requÃªtes sur le stock."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requête de stock."""
+        """Traiter une requÃªte de stock."""
         # Stock ne prend jamais de filtres de date
         result = self.service.get_stock(
             query.huilerie,
@@ -32,10 +32,10 @@ class StockHandler(IntentHandler):
         
         if not rows:
             scope_part = f" pour l'huilerie **{query.huilerie}**" if query.huilerie else ""
-            text = f"Aucune donnée de stock disponible{scope_part}."
+            text = f"Aucune donnÃ©e de stock disponible{scope_part}."
             return IntentResult(text=text, data=[], structured_payload=None)
         
-        # Texte résumé
+        # Texte rÃ©sumÃ©
         lines = []
         for r in rows:
             ref  = r.get("reference_stock") or "N/D"
@@ -48,14 +48,14 @@ class StockHandler(IntentHandler):
         scope_part = f" de l'huilerie **{query.huilerie}**" if query.huilerie else ""
         text = f"Stock{scope_part} :\n" + "\n".join(lines)
         
-        # Payload structuré pour graphique
+        # Payload structurÃ© pour graphique
         labels = [item.get("reference_stock", "N/D") for item in rows]
         structured_payload = {
             "labels": labels,
             "items": rows,
             "value": rows,
             "datasets": [{
-                "label": "Quantité disponible (kg)",
+                "label": "QuantitÃ© disponible (kg)",
                 "data": [item.get("quantite_disponible", 0) for item in rows],
                 "backgroundColor": "#4CAF50",
                 "borderColor": "#2E7D32",
@@ -68,3 +68,4 @@ class StockHandler(IntentHandler):
             data=rows,
             structured_payload=structured_payload
         )
+

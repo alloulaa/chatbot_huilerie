@@ -1,19 +1,19 @@
-"""
-Handler pour l'intent MACHINE (état des machines).
+﻿"""
+Handler pour l'intent MACHINE (Ã©tat des machines).
 """
 from app.services.intent.base import IntentHandler
 from app.domain.chat import ChatQuery, IntentResult
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 
 
 class MachineHandler(IntentHandler):
-    """Handler pour traiter les requêtes sur l'état des machines."""
+    """Handler pour traiter les requÃªtes sur l'Ã©tat des machines."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requête d'état de machines."""
+        """Traiter une requÃªte d'Ã©tat de machines."""
         # Check if user is asking for a complete list vs status/issues
         message_lower = query.message.lower()
         is_list_request = any(word in message_lower for word in [
@@ -31,7 +31,7 @@ class MachineHandler(IntentHandler):
             rows = result.get("value") or []
             
             if not rows:
-                text = f"Aucune machine trouvée."
+                text = f"Aucune machine trouvÃ©e."
                 return IntentResult(text=text, data=[], structured_payload=None)
             
             # Group by huilerie if admin, otherwise just list
@@ -76,9 +76,9 @@ class MachineHandler(IntentHandler):
             
             if not rows:
                 if requested_status:
-                    text = f"Aucune machine en maintenance trouvée."
+                    text = f"Aucune machine en maintenance trouvÃ©e."
                 else:
-                    text = f"Toutes les machines sont opérationnelles."
+                    text = f"Toutes les machines sont opÃ©rationnelles."
                 return IntentResult(text=text, data=[], structured_payload=None)
             
             lines = [
@@ -87,8 +87,9 @@ class MachineHandler(IntentHandler):
                 for r in rows
             ]
             if requested_status:
-                text = f"Machines en panne (état maintenance) :\n" + "\n".join(lines)
+                text = f"Machines en panne (Ã©tat maintenance) :\n" + "\n".join(lines)
             else:
-                text = f"Machines nécessitant attention :\n" + "\n".join(lines)
+                text = f"Machines nÃ©cessitant attention :\n" + "\n".join(lines)
             
             return IntentResult(text=text, data=rows, structured_payload=None)
+

@@ -1,9 +1,9 @@
-"""
+﻿"""
 Handler pour l'intent ANALYSE_LABO.
 """
 from app.services.intent.base import IntentHandler
 from app.domain.chat import ChatQuery, IntentResult
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 
 
 _ANOMALY_KEYWORDS = (
@@ -73,13 +73,13 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class AnalyseLaboHandler(IntentHandler):
-    """Handler pour traiter les requêtes sur les analyses laboratoires."""
+    """Handler pour traiter les requÃªtes sur les analyses laboratoires."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requête d'analyses laboratoires."""
+        """Traiter une requÃªte d'analyses laboratoires."""
         extra_context = getattr(query, "extra_context", {}) or {}
         lot_ref = (
             extra_context.get("lot_reference")
@@ -102,8 +102,8 @@ class AnalyseLaboHandler(IntentHandler):
         lines = []
         for r in rows[:8]:
             lines.append(
-                f"- Lot **{r.get('lot_ref')}** ({r.get('date_analyse')}) — "
-                f"acidité {_fmt(r.get('acidite_huile_pourcent'), 2)} %, "
+                f"- Lot **{r.get('lot_ref')}** ({r.get('date_analyse')}) â€” "
+                f"aciditÃ© {_fmt(r.get('acidite_huile_pourcent'), 2)} %, "
                 f"peroxyde {_fmt(r.get('indice_peroxyde_meq_o2_kg'), 1)}, "
                 f"K270 {_fmt(r.get('k270'), 3)}"
             )
@@ -116,7 +116,7 @@ class AnalyseLaboHandler(IntentHandler):
             "labels": labels,
             "items": rows,
             "datasets": [{
-                "label": "Acidité %",
+                "label": "AciditÃ© %",
                 "data": [r.get('acidite_huile_pourcent', 0) for r in rows],
                 "backgroundColor": "#FF5722"
             }]
@@ -127,3 +127,4 @@ class AnalyseLaboHandler(IntentHandler):
             data=rows,
             structured_payload=structured_payload
         )
+

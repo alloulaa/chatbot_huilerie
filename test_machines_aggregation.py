@@ -1,6 +1,6 @@
-import pytest
+﻿import pytest
 
-import app.services.chatbot_service as cs
+import app.services.query_service as cs
 
 
 class FakeCursor:
@@ -72,3 +72,4 @@ def test_get_machines_utilisees_aggregation(monkeypatch):
     assert first["nbExecutions"] == 2
     assert abs(first["rendementMoyen"] - 45.5) < 1e-6
     assert abs(first["totalProduit"] - 100.0) < 1e-6
+

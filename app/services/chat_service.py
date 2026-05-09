@@ -1,15 +1,14 @@
-"""
-Service unifié de chat qui orchestre NLP et handlers d'intent.
+﻿"""
+Service unifiÃ© de chat qui orchestre NLP et handlers d'intent.
 Remplace le gros chat_controller.py avec une architecture propre.
 """
 import logging
-import unicodedata
 from typing import Any
 from app.nlp.factory import NLPFactory
 from app.nlp.base import NLPAnalyzer
 from app.nlp.huilerie_extractor import extract_huilerie_from_text
 from app.domain.chat import ChatQuery, IntentResult
-from app.domain.intent import Intent, RANKING_INTENTS, TIME_FILTERED_INTENTS
+from app.domain.intent import Intent
 from app.services.intent.base import IntentHandler
 from app.services.intent.stock import StockHandler
 from app.services.intent.machines import MachinesHandler
@@ -28,7 +27,7 @@ from app.services.intent.diagnostic import DiagnosticHandler
 from app.services.intent.campagne import CampagneHandler
 from app.services.intent.reception import ReceptionHandler
 from app.services.intent.mouvement_stock import MouvementStockHandler
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 from app.nlp.normalizer import resolve_period
 
 logger = logging.getLogger(__name__)
@@ -64,8 +63,6 @@ class ChatService:
             Intent.CAMPAGNE: CampagneHandler(self.chatbot_service),
             Intent.RECEPTION: ReceptionHandler(self.chatbot_service),
             Intent.MOUVEMENT_STOCK: MouvementStockHandler(self.chatbot_service),
-            Intent.COMPARAISON: ComparaisonHandler(self.chatbot_service),
-            Intent.EXPLICATION: ExplicationHandler(self.chatbot_service),
         }
     
     async def process_message(
@@ -94,7 +91,7 @@ class ChatService:
         
         logger.info(f"NLP result: intent={intent}, confidence={nlp_result.confiance}")
         
-        # Step 2: Intent Override (basé sur keywords du message)
+        # Step 2: Intent Override (basÃ© sur keywords du message)
         intent = self._apply_intent_overrides(intent, message)
         
         # Step 3: RBAC Check
@@ -104,7 +101,7 @@ class ChatService:
             return {
                 "intent": intent.value,
                 "confidence": nlp_result.confiance,
-                "text": "Accès refusé pour cet intent.",
+                "text": "AccÃ¨s refusÃ© pour cet intent.",
                 "data": None,
                 "error": "permission_denied"
             }
@@ -139,19 +136,19 @@ class ChatService:
                 result = await handler.handle(query)
             else:
                 result = IntentResult(
-                    text=f"Intent '{intent.value}' n'est pas encore implémenté.",
+                    text=f"Intent '{intent.value}' n'est pas encore implÃ©mentÃ©.",
                     data=None
                 )
         except Exception as error:
             logger.exception(f"Error handling intent {intent}: {error}")
             result = IntentResult(
-                text="Une erreur s'est produite lors du traitement de votre requête.",
+                text="Une erreur s'est produite lors du traitement de votre requÃªte.",
                 data=None,
                 structured_payload={"error": str(error)}
             )
         
         # Step 8: Build response
-        # Exposer aussi les entités extraites par le NLP pour compatibilité
+        # Exposer aussi les entitÃ©s extraites par le NLP pour compatibilitÃ©
         entities = {
             "huilerie": resolved_huilerie,
             "periode": nlp_result.periode.value if nlp_result.periode else None,
@@ -177,7 +174,7 @@ class ChatService:
     
     @staticmethod
     def _apply_intent_overrides(intent: Intent, message: str) -> Intent:
-        """Appliquer les overrides d'intent basés sur les keywords."""
+        """Appliquer les overrides d'intent basÃ©s sur les keywords."""
         msg_lower = message.lower().strip()
 
         # Machine override: explicit inventory or state questions should stay on MACHINE.
@@ -188,11 +185,11 @@ class ChatService:
         ]
         machine_use_keywords = [
             "machines les plus", "machine la plus", "frequence machine",
-            "usage machine", "machines utilisees", "machines utilisées",
+            "usage machine", "machines utilisees", "machines utilisÃ©es",
         ]
         if any(k in msg_lower for k in machine_keywords) and not any(k in msg_lower for k in machine_use_keywords):
             if intent not in (Intent.MACHINE, Intent.MACHINES_UTILISEES):
-                logger.info(f"Intent override: {intent} → MACHINE (machine keyword)")
+                logger.info(f"Intent override: {intent} â†’ MACHINE (machine keyword)")
                 return Intent.MACHINE
         
         # Stock override
@@ -203,20 +200,20 @@ class ChatService:
         has_lot = any(k in msg_lower for k in lot_keywords)
         
         if has_stock and not has_lot and intent != Intent.STOCK:
-            logger.info(f"Intent override: {intent} → STOCK (stock keyword)")
+            logger.info(f"Intent override: {intent} â†’ STOCK (stock keyword)")
             return Intent.STOCK
         
         # Lot_liste override
         lot_list_keywords = ["liste lot", "liste des lots", "tous les lots"]
         if any(k in msg_lower for k in lot_list_keywords) and intent not in (Intent.LOT_LISTE, Intent.LOT_CYCLE_VIE):
-            logger.info(f"Intent override: {intent} → LOT_LISTE")
+            logger.info(f"Intent override: {intent} â†’ LOT_LISTE")
             return Intent.LOT_LISTE
         
         return intent
     
     @staticmethod
     def _has_period_keyword(message: str) -> bool:
-        """Vérifier si le message mentionne explicitement une période."""
+        """VÃ©rifier si le message mentionne explicitement une pÃ©riode."""
         period_keywords = [
             "aujourd", "hier", "cette semaine", "semaine derniere", 
             "ce mois", "mois dernier", "2025", "2026", "annee"
@@ -226,5 +223,6 @@ class ChatService:
 
     @staticmethod
     def _extract_huilerie_from_message(message: str) -> str | None:
-        """Reconnaître une huilerie explicitement citée dans le message."""
+        """ReconnaÃ®tre une huilerie explicitement citÃ©e dans le message."""
         return extract_huilerie_from_text(message)
+

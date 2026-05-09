@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Test script for machine listing logic
 """
@@ -6,7 +6,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 
 def test_machine_logic():
     service = ChatbotService()

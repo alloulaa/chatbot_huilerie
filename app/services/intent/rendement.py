@@ -1,9 +1,9 @@
-"""
+﻿"""
 Handler pour l'intent RENDEMENT.
 """
 from app.services.intent.base import IntentHandler
 from app.domain.chat import ChatQuery, IntentResult
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 
 
 def _fmt(value: float, decimals: int = 2) -> str:
@@ -14,13 +14,13 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class RendementHandler(IntentHandler):
-    """Handler pour traiter les requêtes sur le rendement."""
+    """Handler pour traiter les requÃªtes sur le rendement."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requête de rendement."""
+        """Traiter une requÃªte de rendement."""
         query_start_date = query.start_date if query.explicit_period else None
         query_end_date = query.end_date if query.explicit_period else None
         
@@ -28,8 +28,9 @@ class RendementHandler(IntentHandler):
         rend = result.get("value", 0)
         
         if rend <= 0:
-            text = f"Aucune donnée de rendement disponible."
+            text = f"Aucune donnÃ©e de rendement disponible."
             return IntentResult(text=text, data=result, structured_payload=None)
         
         text = f"Rendement moyen : **{_fmt(rend, 1)} %**."
         return IntentResult(text=text, data=result, structured_payload=None)
+

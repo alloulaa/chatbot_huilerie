@@ -1,9 +1,9 @@
-"""
+﻿"""
 Handler pour l'intent RECEPTION.
 """
 from app.services.intent.base import IntentHandler
 from app.domain.chat import ChatQuery, IntentResult
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 
 
 def _fmt(value: float, decimals: int = 2) -> str:
@@ -14,19 +14,19 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class ReceptionHandler(IntentHandler):
-    """Handler pour traiter les requêtes sur les réceptions."""
+    """Handler pour traiter les requÃªtes sur les rÃ©ceptions."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requête de réception."""
+        """Traiter une requÃªte de rÃ©ception."""
         result = self.service.get_reception(query.huilerie, query.start_date, query.end_date, query.enterprise_id)
         rows = result.get("value") or []
         total = result.get("total_kg", 0)
         
         if not rows:
-            text = f"Aucune réception enregistrée."
+            text = f"Aucune rÃ©ception enregistrÃ©e."
             return IntentResult(text=text, data=result, structured_payload=None)
         
         lines = [
@@ -38,8 +38,9 @@ class ReceptionHandler(IntentHandler):
         
         extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
         text = (
-            f"Réceptions — total **{_fmt(total)} kg** :\n"
+            f"RÃ©ceptions â€” total **{_fmt(total)} kg** :\n"
             + "\n".join(lines) + extra
         )
         
         return IntentResult(text=text, data=result, structured_payload=None)
+

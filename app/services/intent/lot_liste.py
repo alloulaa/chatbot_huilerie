@@ -1,9 +1,9 @@
-"""
+﻿"""
 Handler pour l'intent LOT_LISTE.
 """
 from app.services.intent.base import IntentHandler
 from app.domain.chat import ChatQuery, IntentResult
-from app.services.chatbot_service import ChatbotService
+from app.services.query_service import ChatbotService
 
 
 def _fmt(value: float, decimals: int = 2) -> str:
@@ -14,13 +14,13 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class LotListeHandler(IntentHandler):
-    """Handler pour traiter les requêtes sur la liste des lots."""
+    """Handler pour traiter les requÃªtes sur la liste des lots."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requête de liste de lots."""
+        """Traiter une requÃªte de liste de lots."""
         query_start_date = query.start_date if query.explicit_period else None
         query_end_date = query.end_date if query.explicit_period else None
         
@@ -34,7 +34,7 @@ class LotListeHandler(IntentHandler):
         
         if not rows:
             label = "lots non conformes" if non_conf else "lots"
-            text = f"Aucun {label} trouvé."
+            text = f"Aucun {label} trouvÃ©."
             return IntentResult(text=text, data=[], structured_payload=None)
         
         lines = []
@@ -42,19 +42,19 @@ class LotListeHandler(IntentHandler):
             lines.append(
                 f"- **{r.get('reference')}** | {r.get('variete')} | "
                 f"{r.get('fournisseur_nom')} | {_fmt(r.get('quantite_initiale'))} kg | "
-                f"qualité : {r.get('qualite_huile') or 'N/D'}"
+                f"qualitÃ© : {r.get('qualite_huile') or 'N/D'}"
             )
         
         extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
         text = f"Lots :\n" + "\n".join(lines) + extra
         
-        # Payload structuré
+        # Payload structurÃ©
         labels = [r.get('reference', 'Lot') for r in rows]
         structured_payload = {
             "labels": labels,
             "items": rows,
             "datasets": [{
-                "label": "Quantité initiale (kg)",
+                "label": "QuantitÃ© initiale (kg)",
                 "data": [r.get('quantite_initiale', 0) for r in rows],
                 "backgroundColor": "#FF9800"
             }]
@@ -65,3 +65,4 @@ class LotListeHandler(IntentHandler):
             data=rows,
             structured_payload=structured_payload
         )
+
