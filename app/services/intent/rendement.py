@@ -14,13 +14,13 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class RendementHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes sur le rendement."""
+    """Handler pour traiter les requétes sur le rendement."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de rendement."""
+        """Traiter une requête de rendement."""
         query_start_date = query.start_date if query.explicit_period else None
         query_end_date = query.end_date if query.explicit_period else None
         
@@ -28,7 +28,7 @@ class RendementHandler(IntentHandler):
         rend = result.get("value", 0)
         
         if rend <= 0:
-            text = f"Aucune donnÃ©e de rendement disponible."
+            text = f"Aucune donnée de rendement disponible."
             return IntentResult(text=text, data=result, structured_payload=None)
         
         text = f"Rendement moyen : **{_fmt(rend, 1)} %**."

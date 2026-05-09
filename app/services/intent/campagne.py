@@ -14,19 +14,19 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class CampagneHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes sur les campagnes."""
+    """Handler pour traiter les requêtes sur les campagnes."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de campagne."""
+        """Traiter une requête de campagne."""
         annee = query.campagne_annee
         result = self.service.get_campagnes(query.huilerie, query.enterprise_id, annee)
         rows = result.get("value") or []
         
         if not rows:
-            text = "Aucune campagne trouvÃ©e."
+            text = "Aucune campagne trouvée."
             return IntentResult(text=text, data=[], structured_payload=None)
         
         lines = []

@@ -1,15 +1,15 @@
 ﻿"""
 Handler pour l'intent COMPARAISON.
 
-GÃ¨re les questions comparatives qui ne sont pas couvertes par les intents existants :
+Gère les questions comparatives qui ne sont pas couvertes par les intents existants :
   - Comparer des campagnes entre elles (notamment par production litres, un champ
     absent du get_campagnes() existant)
-  - Comparer des pÃ©riodes pour une mÃªme mÃ©trique
+  - Comparer des périodes pour une même métrique
   - Comparer des huileries entre elles
 
-NOTE : La comparaison fournisseurs est dÃ©jÃ  couverte Ã  100% par l'intent "fournisseur"
+NOTE : La comparaison fournisseurs est déjà couverte à 100% par l'intent "fournisseur"
 existant (get_meilleur_fournisseur retourne un ranking par kg DESC + rendement DESC,
-et _build_fournisseur_payload produit les chart datasets). Le prÃ©sent handler ne duplique
+et _build_fournisseur_payload produit les chart datasets). Le présent handler ne duplique
 pas cette logique. Si l'utilisateur demande "quel fournisseur est le meilleur ?",
 le NLP doit router vers "fournisseur".
 """
@@ -72,7 +72,7 @@ class _CampaignComparator:
 
         if not rows:
             return IntentResult(
-                text="Aucune campagne trouvÃ©e pour effectuer une comparaison.",
+                text="Aucune campagne trouvée pour effectuer une comparaison.",
                 data=[],
                 structured_payload=None,
             )
@@ -114,7 +114,7 @@ class _CampaignComparator:
             )
 
         text = (
-            f"**Comparaison des campagnes â€” {metric_label}** :\n\n"
+            f"**Comparaison des campagnes  {metric_label}** :\n\n"
             + "\n".join(lines)
             + f"\n\nðŸ“Š **Meilleure campagne** : {best.get('reference')} ({best.get('annee')}) "
             f"avec **{_fmt(best_val, 0)} {unit}**."
@@ -152,7 +152,7 @@ class _CampaignComparator:
 
 
 class _PeriodComparator:
-    """Compare deux pÃ©riodes pour une mÃªme mÃ©trique."""
+    """Compare deux périodes pour une meme métrique."""
 
     def __init__(self, service: ChatbotService):
         self.service = service
@@ -181,9 +181,9 @@ class _PeriodComparator:
             (["aujourd", "auj", "ce jour"], "aujourd_hui"),
             (["hier"], "hier"),
             (["cette semaine", "semaine en cours"], "cette_semaine"),
-            (["semaine derniere", "semaine passee", "semaine prÃ©cÃ©dente"], "semaine_derniere"),
+            (["semaine derniere", "semaine passee", "semaine précédente"], "semaine_derniere"),
             (["ce mois", "mois en cours", "mois-ci"], "ce_mois"),
-            (["mois dernier", "mois passÃ©", "mois prÃ©cÃ©dent"], "mois_dernier"),
+            (["mois dernier", "mois passé", "mois précédent"], "mois_dernier"),
             (["2026"], "annee_2026"),
             (["2025"], "annee_2025"),
         ]
@@ -231,7 +231,7 @@ class _PeriodComparator:
 
         if not results:
             return IntentResult(
-                text="Impossible de comparer les pÃ©riodes demandÃ©es.",
+                text="Impossible de comparer les pérodes demandées.",
                 data=[],
                 structured_payload=None,
             )
@@ -242,7 +242,7 @@ class _PeriodComparator:
         pct = (diff / v2 * 100) if v2 > 0 else 0
 
         winner = p1["label"] if v1 >= v2 else p2["label"]
-        direction = "ðŸ“ˆ hausse" if diff >= 0 else "ðŸ“‰ baisse"
+        direction = " hausse" if diff >= 0 else " baisse"
 
         text = (
             f"**Comparaison {metric_label}** :\n\n"
@@ -250,7 +250,7 @@ class _PeriodComparator:
             f"â€¢ **{p2['label']}** : {_fmt(v2, 1)} {unit}\n\n"
             f"{direction} de **{_fmt(abs(diff), 1)} {unit}** "
             f"({_fmt(abs(pct), 1)} %) â€” "
-            f"**{winner}** est la meilleure pÃ©riode."
+            f"**{winner}** est la meilleure période."
         )
 
         labels = [p1["label"], p2["label"]]
@@ -340,7 +340,7 @@ class _HuilerieComparator:
         text = (
             f"**Comparaison des huileries â€” {metric_label}** :\n\n"
             + "\n".join(lines)
-            + f"\n\nðŸ† **Meilleure** : **{best['huilerie']}** avec {_fmt(best['value'], 0)} {unit}."
+            + f"\n\n **Meilleure** : **{best['huilerie']}** avec {_fmt(best['value'], 0)} {unit}."
         )
 
         labels = [r["huilerie"] for r in sorted_rows]
@@ -365,7 +365,7 @@ class ComparaisonHandler(IntentHandler):
     @staticmethod
     def _detect_subject(message: str) -> str:
         m = message.lower()
-        if any(kw in m for kw in ["campagne", "saison", "rÃ©colte", "recolte"]):
+        if any(kw in m for kw in ["campagne", "saison", "récolte", "recolte"]):
             return "campagne"
         if any(kw in m for kw in ["huilerie", "moulin", "site", "usine"]):
             return "huilerie"

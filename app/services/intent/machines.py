@@ -14,20 +14,20 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class MachinesHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes sur les machines utilisÃ©es."""
+    """Handler pour traiter les requêtes sur les machines utilisées."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de machines utilisÃ©es."""
+        """Traiter une requÃªte de machines utilisées."""
         message_lower = query.message.lower()
         
         # Check if asking for machines with poor performance/low yield
         is_poor_performance = any(word in message_lower for word in [
             "mauvais rendement", "rendement faible", "moins performant", 
             "performance faible", "efficacite faible", "moins utilisees",
-            "moins utilisÃ©es", "sous-utilisees", "sous-utilisÃ©es"
+            "moins utilisées", "sous-utilisees", "sous-utilisées"
         ])
         
         if is_poor_performance:
@@ -41,7 +41,7 @@ class MachinesHandler(IntentHandler):
             rows = result.get("value") or []
             
             if not rows:
-                text = f"Aucune donnÃ©e de performance machines trouvÃ©e."
+                text = f"Aucune donnée de performance machines trouvée."
                 return IntentResult(text=text, data=[], structured_payload=None)
             
             # Sort by lowest usage and lowest yield
@@ -56,7 +56,7 @@ class MachinesHandler(IntentHandler):
                 nb = r.get('nbExecutions') or r.get('nb_executions') or 0
                 rend = r.get('rendementMoyen') or r.get('rendement_moyen') or 0.0
                 lines.append(
-                    f"- **{nom}** â€” {nb} exÃ©cution(s), "
+                    f"- **{nom}** {nb} exécution(s), "
                     f"rendement {_fmt(rend, 1)} %"
                 )
             
@@ -78,7 +78,7 @@ class MachinesHandler(IntentHandler):
             rows = result.get("value") or []
             
             if not rows:
-                text = f"Aucune donnÃ©e d'utilisation machines trouvÃ©e."
+                text = f"Aucune donnée d'utilisation machines trouvée."
                 return IntentResult(text=text, data=[], structured_payload=None)
             
             lines = []
@@ -88,12 +88,12 @@ class MachinesHandler(IntentHandler):
                 rend = r.get('rendementMoyen') or r.get('rendement_moyen') or 0.0
                 total = r.get('totalProduit') or r.get('total_produit') or 0.0
                 lines.append(
-                    f"- **{nom}** â€” {nb} exÃ©cution(s), "
+                    f"- **{nom}** {nb} exécution(s), "
                     f"rendement {_fmt(rend, 1)} %, {_fmt(total)} L produits"
                 )
             
             extra = f" *(+{len(rows) - 5} autres)*" if len(rows) > 5 else ""
-            text = f"Machines les plus utilisÃ©es :\n" + "\n".join(lines) + extra
+            text = f"Machines les plus utilisées :\n" + "\n".join(lines) + extra
             
             # Payload structurÃ©
             labels = [r.get('nomMachine') or r.get('nom_machine') or "Machine" for r in rows]
@@ -102,7 +102,7 @@ class MachinesHandler(IntentHandler):
                 "items": rows,
                 "datasets": [
                     {
-                        "label": "ExÃ©cutions",
+                        "label": "Exécutions",
                         "data": [r.get('nbExecutions', 0) or r.get('nb_executions', 0) for r in rows],
                         "backgroundColor": "#2196F3"
                     },

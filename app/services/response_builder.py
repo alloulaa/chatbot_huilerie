@@ -5,6 +5,9 @@ from app.models import ChatResponse
 from app.services.session_service import SessionService
 from app.services.chat_formatters import _is_chart_request, _normalize_choice, _safe_float
 
+# Intents qui NE proposent PAS le choix texte/graphique
+_NO_CHOICE_INTENTS = {"explication", "inconnu"}
+
 
 def _annotate_fournisseurs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     annotated: list[dict[str, Any]] = []
@@ -313,6 +316,7 @@ def _chart_data_for(intent: str, data: Any) -> Any:
             "stock": ["variete", "label"],
             "fournisseur": ["fournisseur_nom", "name", "label"],
             "machines_utilisees": ["nomMachine", "machineRef", "nom_machine", "machine_ref", "label"],
+            "machine": ["nomMachine", "nom_machine", "name", "label"],
             "lot_liste": ["reference", "lot_ref", "label"],
             "campagne": ["reference", "annee", "label"],
             "analyse_labo": ["lot_ref", "reference", "label"],
@@ -321,6 +325,7 @@ def _chart_data_for(intent: str, data: Any) -> Any:
         value_keys = {
             "stock": ["total_stock", "value"],
             "machines_utilisees": ["nbExecutions", "nb_executions", "totalProduit", "total_produit", "value"],
+            "machine": ["nbExecutions", "nb_executions", "value"],
             "lot_liste": ["quantite_initiale", "value"],
             "campagne": ["total_olives_kg", "nb_lots", "value"],
             "analyse_labo": ["acidite_huile_pourcent", "indice_peroxyde_meq_o2_kg", "k270", "value"],
@@ -387,6 +392,46 @@ def _chart_data_for(intent: str, data: Any) -> Any:
     return []
 
 
+def _build_structured_payload_for(intent: str, data: Any) -> dict[str, Any] | None:
+    """
+    Construire un structured_payload uniforme pour n'importe quel intent.
+    Retourne None si les données ne permettent pas un graphique.
+    """
+    if data is None:
+        return None
+
+    # Intents avec annotateurs dédiés
+    if intent == "fournisseur" and isinstance(data, list) and data:
+        annotated = _annotate_fournisseurs(data)
+        return _build_fournisseur_payload(annotated)
+    if intent == "machines_utilisees" and isinstance(data, list) and data:
+        annotated = _annotate_machines(data)
+        return _build_machines_payload(annotated)
+    if intent == "lot_liste" and isinstance(data, list) and data:
+        annotated = _annotate_lots(data)
+        return _build_lots_payload(annotated)
+    if intent == "analyse_labo" and isinstance(data, list) and data:
+        annotated = _annotate_analyses(data)
+        return _build_analyses_payload(annotated)
+
+    # Intents scalaires : production, rendement, stock global, etc.
+    chart_data = _chart_data_for(intent, data)
+    if not chart_data:
+        return None
+
+    chart_type = _chart_type_for(intent, data if isinstance(data, list) else None)
+
+    if isinstance(chart_data, list):
+        labels = [item.get("label", str(i)) for i, item in enumerate(chart_data)]
+        datasets = [{"label": intent.replace("_", " ").title(), "data": [item.get("value", 0) for item in chart_data], "type": chart_type}]
+        return {"labels": labels, "datasets": datasets, "items": data}
+
+    if isinstance(chart_data, dict) and "labels" in chart_data and "datasets" in chart_data:
+        return {**chart_data, "items": data}
+
+    return None
+
+
 def build_chat_response(
     *,
     session_service: SessionService,
@@ -401,19 +446,22 @@ def build_chat_response(
     applied_permissions: list | None,
 ) -> ChatResponse:
     """
-    Construire la réponse HTTP finale (texte/graphique/choix).
+    Construire la réponse HTTP finale.
 
-    Cette logique était auparavant dans chat_formatters.py puis a été
-    déplacée dans un module dédié pour mieux séparer le shaping de données
-    et la construction finale de la réponse API.
+    Règle principale :
+      - Tous les intents SAUF ceux dans _NO_CHOICE_INTENTS proposent un choix texte/graphique
+        (ou affichent directement le graphique si l'utilisateur l'a demandé explicitement).
+      - Les intents dans _NO_CHOICE_INTENTS (explication, inconnu) retournent toujours du texte.
     """
     ctx = session_service.get(session_id)
     selected_choice = _normalize_choice(payload_message)
     pending = session_service.get_pending_visualization(session_id)
 
+    # ── 1. Résolution d'un choix en attente ────────────────────────────────
     if selected_choice and pending:
         chart_data = pending.get("chart_data") or []
         chart_type = pending.get("chart_type") or "bar"
+
         if selected_choice == "texte":
             session_service.clear_pending_visualization(session_id)
             text_message = pending.get("text_message") or response_text
@@ -430,6 +478,7 @@ def build_chat_response(
                 applied_permissions=applied_permissions,
                 selected_option="texte",
             )
+
         if selected_choice == "graphique":
             session_service.clear_pending_visualization(session_id)
             return ChatResponse(
@@ -446,155 +495,81 @@ def build_chat_response(
                 selected_option="graphique",
             )
 
-    wants_chart = _is_chart_request(payload_message)
-    is_choice_candidate = isinstance(response_data, list) and len(response_data) > 1
-    ranking_intents = {"fournisseur", "machines_utilisees", "lot_liste", "analyse_labo"}
-
-    if intent in ranking_intents and isinstance(response_data, list) and response_data:
-        if intent == "fournisseur":
-            annotated = _annotate_fournisseurs(response_data)
-            structured_payload = _build_fournisseur_payload(annotated)
-            title_default = "Voici une visualisation des fournisseurs."
-        elif intent == "machines_utilisees":
-            annotated = _annotate_machines(response_data)
-            structured_payload = _build_machines_payload(annotated)
-            title_default = "Voici une visualisation des machines."
-        elif intent == "lot_liste":
-            annotated = _annotate_lots(response_data)
-            structured_payload = _build_lots_payload(annotated)
-            title_default = "Voici une visualisation des lots."
-        elif intent == "analyse_labo":
-            annotated = _annotate_analyses(response_data)
-            structured_payload = _build_analyses_payload(annotated)
-            title_default = "Voici une visualisation des analyses."
-        else:
-            structured_payload = None
-            title_default = "Voici une visualisation des résultats."
-
-        if structured_payload:
-            chart_data = {"labels": structured_payload["labels"], "datasets": structured_payload["datasets"]}
-            chart_type = "bar"
-
-            if wants_chart:
-                session_service.clear_pending_visualization(session_id)
-                return ChatResponse(
-                    type="chart",
-                    message=response_text or title_default,
-                    intent=intent,
-                    confidence=confidence,
-                    entities=entities,
-                    response=response_text or title_default,
-                    chart_type=chart_type,
-                    data=chart_data,
-                    applied_scope=applied_scope,
-                    applied_permissions=applied_permissions,
-                )
-
-            if len(response_data) > 1:
-                session_service.set_pending_visualization(session_id, {
-                    "text_message": response_text,
-                    "chart_data": chart_data,
-                    "chart_type": chart_type,
-                    "raw_data": structured_payload,
-                    "intent": intent,
-                })
-                question = "Souhaitez-vous voir les résultats sous forme de texte ou de graphique ?"
-                return ChatResponse(
-                    type="choice",
-                    message=question,
-                    intent=intent,
-                    confidence=confidence,
-                    entities=entities,
-                    response=question,
-                    options=["texte", "graphique"],
-                    chart_type=chart_type,
-                    data=structured_payload,
-                    applied_scope=applied_scope,
-                    applied_permissions=applied_permissions,
-                    pending_choice=True,
-                )
-
-            session_service.clear_pending_visualization(session_id)
-            return ChatResponse(
-                type="text",
-                message=response_text,
-                intent=intent,
-                confidence=confidence,
-                entities=entities,
-                response=response_text,
-                data=structured_payload,
-                applied_scope=applied_scope,
-                applied_permissions=applied_permissions,
-            )
-
-    if is_choice_candidate:
-        chart_data = _chart_data_for(intent, response_data)
-        chart_type = _chart_type_for(intent, response_data)
-
-        if wants_chart:
-            session_service.clear_pending_visualization(session_id)
-            return ChatResponse(
-                type="chart",
-                message=response_text or "Voici une visualisation des résultats.",
-                intent=intent,
-                confidence=confidence,
-                entities=entities,
-                response=response_text or "Voici une visualisation des résultats.",
-                chart_type=chart_type,
-                data=chart_data,
-                applied_scope=applied_scope,
-                applied_permissions=applied_permissions,
-            )
-
-        session_service.set_pending_visualization(session_id, {
-            "text_message": response_text,
-            "chart_data": chart_data,
-            "chart_type": chart_type,
-            "raw_data": response_data,
-            "intent": intent,
-        })
-        question = "Souhaitez-vous voir les résultats sous forme de texte ou de graphique ?"
+    # ── 2. Intents sans choix (explication, inconnu) → texte direct ────────
+    if intent in _NO_CHOICE_INTENTS:
+        session_service.clear_pending_visualization(session_id)
         return ChatResponse(
-            type="choice",
-            message=response_text + "\n\n" + question,
+            type="text",
+            message=response_text,
             intent=intent,
             confidence=confidence,
             entities=entities,
-            response=response_text + "\n\n" + question,
-            options=["texte", "graphique"],
-            chart_type=chart_type,
+            response=response_text,
             data=response_data,
             applied_scope=applied_scope,
             applied_permissions=applied_permissions,
-            pending_choice=True,
         )
 
-    if wants_chart:
-        chart_data = _chart_data_for(intent, response_data)
-        if chart_data:
-            chart_type = _chart_type_for(intent, response_data)
-            return ChatResponse(
-                type="chart",
-                message=response_text or "Voici une visualisation des résultats.",
-                intent=intent,
-                confidence=confidence,
-                entities=entities,
-                response=response_text or "Voici une visualisation des résultats.",
-                chart_type=chart_type,
-                data=chart_data,
-                applied_scope=applied_scope,
-                applied_permissions=applied_permissions,
-            )
+    # ── 3. Tous les autres intents : choix texte / graphique ───────────────
+    wants_chart = _is_chart_request(payload_message)
 
-    session_service.clear_pending_visualization(session_id)
+    # Construire le payload graphique
+    structured_payload = _build_structured_payload_for(intent, response_data)
+
+    # Si aucune donnée graphique n'est disponible, répondre en texte directement
+    if structured_payload is None:
+        session_service.clear_pending_visualization(session_id)
+        return ChatResponse(
+            type="text",
+            message=response_text,
+            intent=intent,
+            confidence=confidence,
+            entities=entities,
+            response=response_text,
+            data=response_data,
+            applied_scope=applied_scope,
+            applied_permissions=applied_permissions,
+        )
+
+    chart_data = {"labels": structured_payload.get("labels", []), "datasets": structured_payload.get("datasets", [])}
+    chart_type = _chart_type_for(intent, response_data if isinstance(response_data, list) else None)
+
+    # L'utilisateur a explicitement demandé un graphique → afficher directement
+    if wants_chart:
+        session_service.clear_pending_visualization(session_id)
+        return ChatResponse(
+            type="chart",
+            message=response_text or "Voici la visualisation demandée.",
+            intent=intent,
+            confidence=confidence,
+            entities=entities,
+            response=response_text or "Voici la visualisation demandée.",
+            chart_type=chart_type,
+            data=chart_data,
+            applied_scope=applied_scope,
+            applied_permissions=applied_permissions,
+        )
+
+    # Cas standard : proposer le choix texte / graphique
+    session_service.set_pending_visualization(session_id, {
+        "text_message": response_text,
+        "chart_data": chart_data,
+        "chart_type": chart_type,
+        "raw_data": structured_payload,
+        "intent": intent,
+    })
+    question = "Souhaitez-vous voir les résultats sous forme de **texte** ou de **graphique** ?"
     return ChatResponse(
-        type="text",
-        message=response_text,
+        type="choice",
+        message=question,
         intent=intent,
         confidence=confidence,
         entities=entities,
-        response=response_text,
-        data=response_data,
+        response=question,
+        options=["texte", "graphique"],
+        chart_type=chart_type,
+        data=structured_payload,
         applied_scope=applied_scope,
         applied_permissions=applied_permissions,
+        pending_choice=True,
     )

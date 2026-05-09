@@ -14,14 +14,14 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class FournisseurHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes sur les fournisseurs."""
+    """Handler pour traiter les requêtes sur les fournisseurs."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de fournisseurs."""
-        # Appliquer dates seulement si pÃ©riode explicite
+        """Traiter une requête de fournisseurs."""
+        # Appliquer dates seulement si période explicite
         query_start_date = query.start_date if query.explicit_period else None
         query_end_date = query.end_date if query.explicit_period else None
         
@@ -31,38 +31,51 @@ class FournisseurHandler(IntentHandler):
             query_end_date,
             query.enterprise_id
         )
-        rows = result.get("value") or []
+        raw_rows = result.get("value") or []
+
+        # Normalize keys from repository output to UI-friendly keys.
+        rows = []
+        for r in raw_rows:
+            rows.append({
+                "fournisseur_nom": r.get("fournisseur_nom", "Fournisseur"),
+                "lots": r.get("lots", r.get("nb_lots", 0)),
+                "kg": r.get("kg", r.get("quantite_totale_kg", 0)),
+                "rendement": r.get("rendement", r.get("rendement_moyen", 0)),
+                "acidity": r.get("acidity", r.get("acidite_moyenne", 0)),
+                "acidite_status": r.get("acidite_status"),
+                "rendement_status": r.get("rendement_status"),
+            })
         
         if not rows:
-            text = f"Aucune donnÃ©e fournisseur disponible."
+            text = f"Aucune donnée fournisseur disponible."
             return IntentResult(text=text, data=[], structured_payload=None)
         
         lines = []
         for i, r in enumerate(rows[:8], 1):
-            acid_flag = " âš ï¸" if r.get("acidite_status") == "out of range" else ""
-            rend_flag = " âš ï¸" if r.get("rendement_status") == "out of range" else ""
+            acid_flag = " ⚠️" if r.get("acidite_status") == "out of range" else ""
+            rend_flag = " ⚠️" if r.get("rendement_status") == "out of range" else ""
             lines.append(
-                f"{i}. **{r.get('fournisseur_nom', 'Fournisseur')}** â€” {r.get('lots', 0)} lot(s), "
+                f"{i}. **{r.get('fournisseur_nom', 'Fournisseur')}** – {r.get('lots', 0)} lot(s), "
                 f"{_fmt(r.get('kg', 0))} kg, rendement {_fmt(r.get('rendement', 0), 1)} %{rend_flag}, "
-                f"aciditÃ© {_fmt(r.get('acidity', 0), 2)} %{acid_flag}"
+                f"acidité {_fmt(r.get('acidity', 0), 2)} %{acid_flag}"
             )
         
         extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
         text = f"Classement fournisseurs :\n" + "\n".join(lines) + extra
         
-        # Payload structurÃ©
+        # Payload structuré
         labels = [r.get('fournisseur_nom', 'Fournisseur') for r in rows]
         structured_payload = {
             "labels": labels,
             "items": rows,
             "datasets": [
                 {
-                    "label": "Kg livrÃ©s",
+                    "label": "Kg livrés",
                     "data": [r.get('kg', 0) for r in rows],
                     "backgroundColor": "#4CAF50"
                 },
                 {
-                    "label": "AciditÃ© %",
+                    "label": "Acidité %",
                     "data": [r.get('acidity', 0) for r in rows],
                     "backgroundColor": "#FF5722"
                 }

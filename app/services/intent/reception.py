@@ -14,19 +14,19 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class ReceptionHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes sur les rÃ©ceptions."""
+    """Handler pour traiter les requétes sur les réceptions."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de rÃ©ception."""
+        """Traiter une requête de réception."""
         result = self.service.get_reception(query.huilerie, query.start_date, query.end_date, query.enterprise_id)
         rows = result.get("value") or []
         total = result.get("total_kg", 0)
         
         if not rows:
-            text = f"Aucune rÃ©ception enregistrÃ©e."
+            text = f"Aucune réception enregistrée."
             return IntentResult(text=text, data=result, structured_payload=None)
         
         lines = [
@@ -38,7 +38,7 @@ class ReceptionHandler(IntentHandler):
         
         extra = f" *(+{len(rows) - 8} autres)*" if len(rows) > 8 else ""
         text = (
-            f"RÃ©ceptions â€” total **{_fmt(total)} kg** :\n"
+            f"Réceptions — total **{_fmt(total)} kg** :\n"
             + "\n".join(lines) + extra
         )
         

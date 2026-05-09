@@ -14,13 +14,13 @@ def _fmt(value: float, decimals: int = 2) -> str:
 
 
 class ProductionHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes sur la production."""
+    """Handler pour traiter les requétes sur la production."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de production."""
+        """Traiter une requéte de production."""
         query_start_date = query.start_date if query.explicit_period else None
         query_end_date = query.end_date if query.explicit_period else None
         
@@ -28,7 +28,7 @@ class ProductionHandler(IntentHandler):
         total = result.get("value", 0)
         
         if total <= 0:
-            text = f"Aucune production enregistrÃ©e."
+            text = f"Aucune production enregistrée."
             return IntentResult(text=text, data=result, structured_payload=None)
         
         text = f"Production : **{_fmt(total)} litres** d'huile."

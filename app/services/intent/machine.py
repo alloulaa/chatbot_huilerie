@@ -7,13 +7,13 @@ from app.services.query_service import ChatbotService
 
 
 class MachineHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes sur l'Ã©tat des machines."""
+    """Handler pour traiter les requÃªétes sur l'Ã©tat des machines."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte d'Ã©tat de machines."""
+        """Traiter une requete d'état de machines."""
         # Check if user is asking for a complete list vs status/issues
         message_lower = query.message.lower()
         is_panne_request = any(word in message_lower for word in [
@@ -33,7 +33,7 @@ class MachineHandler(IntentHandler):
             rows = result.get("value") or []
             
             if not rows:
-                text = f"Aucune machine trouvÃ©e."
+                text = f"Aucune machine trouvée."
                 return IntentResult(text=text, data=[], structured_payload=None)
             
             # Group by huilerie if admin, otherwise just list
@@ -78,9 +78,9 @@ class MachineHandler(IntentHandler):
             
             if not rows:
                 if requested_status:
-                    text = f"Aucune machine en maintenance trouvÃ©e."
+                    text = f"Aucune machine en maintenance trouvée."
                 else:
-                    text = f"Toutes les machines sont opÃ©rationnelles."
+                    text = f"Toutes les machines sont opérationnelles."
                 return IntentResult(text=text, data=[], structured_payload=None)
             
             lines = [
@@ -89,9 +89,9 @@ class MachineHandler(IntentHandler):
                 for r in rows
             ]
             if requested_status:
-                text = f"Machines en panne (Ã©tat maintenance) :\n" + "\n".join(lines)
+                text = f"Machines en panne (état maintenance) :\n" + "\n".join(lines)
             else:
-                text = f"Machines nÃ©cessitant attention :\n" + "\n".join(lines)
+                text = f"Voici les machines:       \n" + "\n".join(lines)
             
             return IntentResult(text=text, data=rows, structured_payload=None)
 

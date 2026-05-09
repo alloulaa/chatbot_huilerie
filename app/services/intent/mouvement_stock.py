@@ -7,13 +7,13 @@ from app.services.query_service import ChatbotService
 
 
 class MouvementStockHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes sur les mouvements de stock."""
+    """Handler pour traiter les requétes sur les mouvements de stock."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de mouvement de stock."""
+        """Traiter une requête de mouvement de stock."""
         query_start_date = query.start_date if query.explicit_period else None
         query_end_date = query.end_date if query.explicit_period else None
         result = self.service.get_mouvements_stock(

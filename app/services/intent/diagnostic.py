@@ -7,13 +7,13 @@ from app.services.query_service import ChatbotService
 
 
 class DiagnosticHandler(IntentHandler):
-    """Handler pour traiter les requÃªtes de diagnostic qualitÃ©."""
+    """Handler pour traiter les requêtes de diagnostic qualité."""
     
     def __init__(self, service: ChatbotService):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de diagnostic."""
+        """Traiter une requête de diagnostic."""
         result = self.service.diagnostic_qualite(query.huilerie, query.start_date, query.end_date, query.enterprise_id)
         issues = result.get("issues") or []
         rows = result.get("rows") or []
@@ -24,7 +24,7 @@ class DiagnosticHandler(IntentHandler):
         
         if issues:
             text = (
-                f"QualitÃ© insuffisante â€” causes identifiÃ©es : "
+                f"Qualitée insuffisante ” causes identifiées : "
                 + ", ".join(f"**{i}**" for i in issues) + "."
             )
         else:

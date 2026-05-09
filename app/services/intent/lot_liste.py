@@ -20,7 +20,7 @@ class LotListeHandler(IntentHandler):
         self.service = service
     
     async def handle(self, query: ChatQuery) -> IntentResult:
-        """Traiter une requÃªte de liste de lots."""
+        """Traiter une requête de liste de lots."""
         query_start_date = query.start_date if query.explicit_period else None
         query_end_date = query.end_date if query.explicit_period else None
         
@@ -34,7 +34,7 @@ class LotListeHandler(IntentHandler):
         
         if not rows:
             label = "lots non conformes" if non_conf else "lots"
-            text = f"Aucun {label} trouvÃ©."
+            text = f"Aucun {label} trouvé."
             return IntentResult(text=text, data=[], structured_payload=None)
         
         lines = []
@@ -54,7 +54,7 @@ class LotListeHandler(IntentHandler):
             "labels": labels,
             "items": rows,
             "datasets": [{
-                "label": "QuantitÃ© initiale (kg)",
+                "label": "Quantité initiale (kg)",
                 "data": [r.get('quantite_initiale', 0) for r in rows],
                 "backgroundColor": "#FF9800"
             }]

@@ -32,7 +32,7 @@ class StockHandler(IntentHandler):
         
         if not rows:
             scope_part = f" pour l'huilerie **{query.huilerie}**" if query.huilerie else ""
-            text = f"Aucune donnÃ©e de stock disponible{scope_part}."
+            text = f"Aucune donnée de stock disponible{scope_part}."
             return IntentResult(text=text, data=[], structured_payload=None)
         
         # Texte rÃ©sumÃ©
@@ -55,7 +55,7 @@ class StockHandler(IntentHandler):
             "items": rows,
             "value": rows,
             "datasets": [{
-                "label": "QuantitÃ© disponible (kg)",
+                "label": "Quantité disponible (kg)",
                 "data": [item.get("quantite_disponible", 0) for item in rows],
                 "backgroundColor": "#4CAF50",
                 "borderColor": "#2E7D32",
