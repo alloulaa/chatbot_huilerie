@@ -6,17 +6,18 @@ from app.services.session_service import SessionService
 from app.services.chat_formatters import _is_chart_request, _normalize_choice, _safe_float
 
 # Intents qui NE proposent PAS le choix texte/graphique
-_NO_CHOICE_INTENTS = {"explication", "inconnu"}
+# Ajouter "machine" : l'intent machine doit toujours retourner du texte
+_NO_CHOICE_INTENTS = {"explication", "inconnu", "machine"}
 
 
 def _annotate_fournisseurs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     annotated: list[dict[str, Any]] = []
     for idx, r in enumerate(rows, start=1):
-        fournisseur_nom: str = r.get("fournisseur_nom") or "Inconnu"
-        lots: int = int(_safe_float(r.get("nb_lots"), 0))
-        kg: float = _safe_float(r.get("quantite_totale_kg"), 0.0)
-        rendement: float = _safe_float(r.get("rendement_moyen"), 0.0)
-        acidity: float = _safe_float(r.get("acidite_moyenne"), 0.0)
+        fournisseur_nom: str = r.get("name") or r.get("fournisseur_nom") or "Inconnu"
+        lots: int = int(_safe_float(r.get("lots") or r.get("nb_lots"), 0))
+        kg: float = _safe_float(r.get("kg") or r.get("quantite_totale_kg"), 0.0)
+        rendement: float = _safe_float(r.get("rendement") or r.get("rendement_moyen"), 0.0)
+        acidity: float = _safe_float(r.get("acidity") or r.get("acidite_moyenne") or r.get("acidite"), 0.0)
 
         nr = dict(r)
         nr["rang"] = idx
@@ -44,10 +45,10 @@ def _build_fournisseur_payload(annotated: list[dict[str, Any]]) -> dict[str, Any
 
     for r in annotated:
         name: str = str(r.get("name") or r.get("fournisseur_nom") or "Inconnu")
-        kg: float = _safe_float(r.get("kg") or r.get("quantite_totale_kg"), 0.0)
-        acidity: float = _safe_float(r.get("acidity") or r.get("acidite_moyenne"), 0.0)
-        rendement: float = _safe_float(r.get("rendement") or r.get("rendement_moyen"), 0.0)
-        lots: int = int(_safe_float(r.get("lots") or r.get("nb_lots"), 0))
+        kg: float = _safe_float(r.get("kg"), 0.0)
+        acidity: float = _safe_float(r.get("acidity"), 0.0)
+        rendement: float = _safe_float(r.get("rendement"), 0.0)
+        lots: int = int(_safe_float(r.get("lots"), 0))
 
         suppliers.append({
             "rang": r.get("rang"),
@@ -84,8 +85,8 @@ def _build_fournisseur_payload(annotated: list[dict[str, Any]]) -> dict[str, Any
 def _annotate_machines(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     annotated: list[dict[str, Any]] = []
     for idx, r in enumerate(rows, start=1):
-        nom: str = r.get("nomMachine") or r.get("nom_machine") or "Machine inconnue"
-        ref: str = r.get("machineRef") or r.get("machine_ref") or "N/D"
+        nom: str = r.get("nomMachine") or r.get("nom_machine") or r.get("name") or "Machine inconnue"
+        ref: str = r.get("machineRef") or r.get("machine_ref") or r.get("reference") or "N/D"
         etat: str = r.get("etatMachine") or r.get("etat_machine") or r.get("etat") or "INCONNU"
         nb_exec: int = int(_safe_float(r.get("nbExecutions") or r.get("nb_executions"), 0))
         rend_moy: float = _safe_float(r.get("rendementMoyen") or r.get("rendement_moyen"), 0.0)
@@ -154,11 +155,11 @@ def _build_machines_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
 def _annotate_lots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     annotated: list[dict[str, Any]] = []
     for idx, r in enumerate(rows, start=1):
-        ref: str = r.get("reference") or "N/D"
-        var: str = r.get("variete") or "N/D"
-        fournisseur: str = r.get("fournisseur_nom") or "N/D"
-        qte: float = _safe_float(r.get("quantite_initiale"), 0.0)
-        qualite: str = r.get("qualite_huile") or "N/D"
+        ref: str = r.get("reference") or r.get("ref") or "N/D"
+        var: str = r.get("variete") or r.get("variety") or "N/D"
+        fournisseur: str = r.get("fournisseur_nom") or r.get("supplier") or r.get("fournisseur") or "N/D"
+        qte: float = _safe_float(r.get("quantite_initiale") or r.get("quantite") or r.get("quantity"), 0.0)
+        qualite: str = r.get("qualite_huile") or r.get("qualite") or r.get("quality") or "N/D"
 
         nr = dict(r)
         nr["rang"] = idx
@@ -207,10 +208,10 @@ def _build_lots_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
 def _annotate_analyses(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     annotated: list[dict[str, Any]] = []
     for idx, r in enumerate(rows, start=1):
-        lot_ref: str = r.get("lot_ref") or "N/D"
-        date: str = r.get("date_analyse") or "N/D"
-        acidity: float = _safe_float(r.get("acidite_huile_pourcent"), 0.0)
-        peroxide: float = _safe_float(r.get("indice_peroxyde_meq_o2_kg"), 0.0)
+        lot_ref: str = r.get("lot_ref") or r.get("reference") or r.get("lot_reference") or "N/D"
+        date: str = r.get("date_analyse") or r.get("date") or "N/D"
+        acidity: float = _safe_float(r.get("acidite_huile_pourcent") or r.get("acidite") or r.get("acidity"), 0.0)
+        peroxide: float = _safe_float(r.get("indice_peroxyde_meq_o2_kg") or r.get("peroxyde") or r.get("peroxide"), 0.0)
         k270: float = _safe_float(r.get("k270"), 0.0)
 
         nr = dict(r)
@@ -277,6 +278,33 @@ def _build_analyses_payload(annotated: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _annotate_stock(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    annotated: list[dict[str, Any]] = []
+    for idx, r in enumerate(rows, start=1):
+        variete = r.get("variete") or "Inconnue"
+        reference = r.get("reference_stock") or r.get("reference") or r.get("ref") or variete
+        references_lots = r.get("references_lots") or r.get("lot_reference") or r.get("lots") or ""
+        type_stock = r.get("type_stock") or r.get("type") or r.get("label") or "N/D"
+        total = _safe_float(r.get("total_stock") or r.get("quantite_disponible"), 0.0)
+
+        nr = dict(r)
+        nr["rang"] = idx
+        nr["name"] = variete
+        nr["reference_stock"] = reference
+        nr["reference"] = reference
+        nr["variete"] = variete
+        nr["references_lots"] = references_lots
+        nr["lot_reference"] = references_lots
+        nr["lots"] = references_lots
+        nr["type"] = type_stock
+        nr["type_stock"] = type_stock
+        nr["total_stock"] = total
+        nr["quantite"] = total
+        nr["quantite_disponible"] = total
+        annotated.append(nr)
+    return annotated
+
+
 def _chart_type_for(intent: str, rows: list[dict[str, Any]] | dict[str, Any] | None) -> str:
     if intent == "qualite":
         return "pie"
@@ -318,21 +346,21 @@ def _chart_data_for(intent: str, data: Any) -> Any:
 
         label_keys = {
             "stock": ["variete", "label"],
-            "fournisseur": ["fournisseur_nom", "name", "label"],
-            "machines_utilisees": ["nomMachine", "machineRef", "nom_machine", "machine_ref", "label"],
-            "machine": ["nomMachine", "nom_machine", "name", "label"],
-            "lot_liste": ["reference", "lot_ref", "label"],
-            "campagne": ["reference", "annee", "label"],
-            "analyse_labo": ["lot_ref", "reference", "label"],
-            "reception": ["reference", "lot_ref", "label"],
+            "fournisseur": ["name", "fournisseur_nom", "label"],
+            "machines_utilisees": ["name", "nomMachine", "machineRef", "label"],
+            "machine": ["name", "nomMachine", "label"],
+            "lot_liste": ["name", "reference", "lot_ref", "label"],
+            "campagne": ["name", "reference", "annee", "label"],
+            "analyse_labo": ["name", "lot_ref", "reference", "label"],
+            "reception": ["name", "reference", "lot_ref", "label"],
         }
         value_keys = {
-            "stock": ["total_stock", "value"],
-            "machines_utilisees": ["nbExecutions", "nb_executions", "totalProduit", "total_produit", "value"],
-            "machine": ["nbExecutions", "nb_executions", "value"],
+            "stock": ["total_stock", "quantite_disponible", "value"],
+            "machines_utilisees": ["nbExecutions", "rendementMoyen", "totalProduit", "value"],
+            "machine": ["nbExecutions", "rendementMoyen", "value"],
             "lot_liste": ["quantite_initiale", "value"],
-            "campagne": ["total_olives_kg", "nb_lots", "value"],
-            "analyse_labo": ["acidite_huile_pourcent", "indice_peroxyde_meq_o2_kg", "k270", "value"],
+            "campagne": ["total_olives_kg", "nbLots", "value"],
+            "analyse_labo": ["acidite_huile_pourcent", "indicePeroxydeMeqO2Kg", "k270", "value"],
             "reception": ["quantite_initiale", "value"],
         }
 
@@ -349,11 +377,11 @@ def _chart_data_for(intent: str, data: Any) -> Any:
             labels.append(str(label if label is not None else f"Item {index}"))
 
         preferred_order = list(dict.fromkeys(preferred_values + [
-            "quantite_totale_kg", "quantite_initiale", "total_produit", "total_stock",
-            "rendement_moyen", "acidite_huile_pourcent", "indice_peroxyde_meq_o2_kg", "k270",
+            "kg", "quantite_initiale", "totalProduit", "total_stock",
+            "rendementMoyen", "acidite_huile_pourcent", "indicePeroxydeMeqO2Kg", "k270",
             "value", "total", "count", "nb_lots"
         ]))
-        for cv in ["quantiteTotaleKg", "quantiteInitiale", "totalProduit", "totalStock", "rendementMoyen", "aciditeMoyenne", "indicePeroxydeMeqO2Kg", "k270", "value", "total", "count", "nbLots", "nbExecutions"]:
+        for cv in ["kg", "quantiteInitiale", "totalProduit", "totalStock", "rendementMoyen", "acidity", "indicePeroxydeMeqO2Kg", "k270", "value", "total", "count", "nbLots", "nbExecutions", "quantite_disponible"]:
             if cv not in preferred_order:
                 preferred_order.append(cv)
 
@@ -417,6 +445,11 @@ def _build_structured_payload_for(intent: str, data: Any) -> dict[str, Any] | No
     if intent == "analyse_labo" and isinstance(data, list) and data:
         annotated = _annotate_analyses(data)
         return _build_analyses_payload(annotated)
+    if intent == "stock" and isinstance(data, list) and data:
+        annotated = _annotate_stock(data)
+        labels = [r["reference_stock"] for r in annotated]
+        datasets = [{"label": "Stock (kg)", "data": [r["total_stock"] for r in annotated], "type": "bar"}]
+        return {"labels": labels, "datasets": datasets, "items": annotated, "value": annotated}
 
     # Intents scalaires : production, rendement, stock global, etc.
     chart_data = _chart_data_for(intent, data)
@@ -465,12 +498,12 @@ def build_chat_response(
     if selected_choice and pending:
         chart_data = pending.get("chart_data") or []
         chart_type = pending.get("chart_type") or "bar"
-        raw_data = pending.get("raw_data") or {}
+        raw_data = dict(pending.get("raw_data") or {})
+        pending_intent = str(pending.get("intent") or intent)
 
         if selected_choice == "texte":
             session_service.clear_pending_visualization(session_id)
             text_message = pending.get("text_message") or response_text
-            pending_intent = pending.get("intent") or intent
             return ChatResponse(
                 type="text",
                 message=text_message,
@@ -492,7 +525,7 @@ def build_chat_response(
             return ChatResponse(
                 type="chart",
                 message="Voici la visualisation demandée.",
-                intent=intent,
+                intent=pending_intent,
                 confidence=confidence,
                 entities=entities,
                 response="Voici la visualisation demandée.",

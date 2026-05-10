@@ -50,7 +50,7 @@ Le client de prédiction utilise `http://127.0.0.1:7500` par défaut lorsque `PR
 
 Puis ouvrir :
 ```text
-http://127.0.0.1:8000/
+http://127.0.0.1:8001/
 ```
 
 ## API

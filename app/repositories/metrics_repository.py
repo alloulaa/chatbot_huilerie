@@ -19,7 +19,12 @@ class MetricsRepository:
         enterprise_id: int | None = None,
     ) -> dict[str, Any]:
         query = """
-            SELECT s.variete, SUM(s.quantite_disponible) AS total_stock
+            SELECT
+                s.reference AS reference_stock,
+                s.type_stock,
+                s.variete,
+                SUM(s.quantite_disponible) AS total_stock,
+                GROUP_CONCAT(DISTINCT lo.reference ORDER BY lo.reference SEPARATOR ', ') AS references_lots
             FROM stock s
             LEFT JOIN lot_olives lo ON lo.id_lot = s.lot_id
             LEFT JOIN huilerie h ON h.id_huilerie = lo.huilerie_id
@@ -35,7 +40,7 @@ class MetricsRepository:
         if start_date and end_date:
             query += " AND lo.date_reception BETWEEN %s AND %s"
             params.extend([start_date, end_date])
-        query += " GROUP BY s.variete ORDER BY s.variete"
+        query += " GROUP BY s.reference, s.type_stock, s.variete ORDER BY s.reference, s.variete"
 
         connection = None
         cursor = None
@@ -46,8 +51,13 @@ class MetricsRepository:
             rows = cursor.fetchall() or []
             normalized = [
                 {
+                    "reference_stock": row.get("reference_stock") or "N/D",
+                    "type_stock": row.get("type_stock") or "N/D",
                     "variete": row.get("variete") or "Inconnue",
                     "total_stock": to_float(row.get("total_stock"), 0.0),
+                    "quantite_disponible": to_float(row.get("total_stock"), 0.0),
+                    "references_lots": row.get("references_lots") or "",
+                    "lot_reference": row.get("references_lots") or "",
                 }
                 for row in rows
             ]
