@@ -1,20 +1,36 @@
 ﻿"""
-Handler pour l'intent MACHINE (Ã©tat des machines).
+Handler pour l'intent MACHINE (état des machines).
 """
 from app.services.intent.base import IntentHandler
 from app.domain.chat import ChatQuery, IntentResult
 from app.services.query_service import ChatbotService
 
 
+_ETAT_ICONS = {
+    "en_service":     "✅",
+    "EN_SERVICE":     "✅",
+    "en service":     "✅",
+    "maintenance":    "🔧",
+    "en maintenance": "🔧",
+    "EN_MAINTENANCE": "🔧",
+    "hors_service":   "❌",
+    "HORS_SERVICE":   "❌",
+    "hors service":   "❌",
+}
+
+
+def _icon(etat: str | None) -> str:
+    return _ETAT_ICONS.get(str(etat or ""), "❓")
+
+
 class MachineHandler(IntentHandler):
-    """Handler pour traiter les requÃªétes sur l'Ã©tat des machines."""
-    
+    """Handler pour traiter les requêtes sur l'état des machines."""
+
     def __init__(self, service: ChatbotService):
         self.service = service
-    
+
     async def handle(self, query: ChatQuery) -> IntentResult:
         """Traiter une requete d'état de machines."""
-        # Check if user is asking for a complete list vs status/issues
         message_lower = query.message.lower()
         is_panne_request = any(word in message_lower for word in [
             "en panne", "panne", "hors service", "maintenance"
@@ -26,47 +42,39 @@ class MachineHandler(IntentHandler):
         requested_status = "maintenance" if is_panne_request else None
         query_start_date = query.start_date if query.explicit_period else None
         query_end_date = query.end_date if query.explicit_period else None
-        
+
         if is_list_request:
-            # Return complete list of machines
             result = self.service.get_all_machines(query.huilerie, query.enterprise_id)
             rows = result.get("value") or []
-            
+
             if not rows:
-                text = f"Aucune machine trouvée."
-                return IntentResult(text=text, data=[], structured_payload=None)
-            
-            # Group by huilerie if admin, otherwise just list
+                return IntentResult(text="Aucune machine trouvée.", data=[], structured_payload=None)
+
             if query.huilerie:
-                # Single huilerie
-                lines = [
-                    f"- **{r.get('nomMachine')}** : {r.get('etatMachine')}"
+                items = "\n".join(
+                    f"- {_icon(r.get('etatMachine'))} **{r.get('nomMachine')}** — {r.get('etatMachine')}"
                     for r in rows
-                ]
-                text = f"Machines de l'huilerie {query.huilerie} :\n" + "\n".join(lines)
+                )
+                text = f"🏭 Machines de **{query.huilerie}** ({len(rows)}) :\n{items}"
             else:
-                # Multiple huileries - group by huilerie
-                huilerie_groups = {}
+                huilerie_groups: dict = {}
                 for r in rows:
-                    huilerie = r.get('huilerie', 'Huilerie inconnue')
-                    if huilerie not in huilerie_groups:
-                        huilerie_groups[huilerie] = []
-                    huilerie_groups[huilerie].append(r)
-                
+                    h = r.get('huilerie', 'Huilerie inconnue')
+                    huilerie_groups.setdefault(h, []).append(r)
+
                 sections = []
-                for huilerie, machines in huilerie_groups.items():
-                    section_lines = [f"**{huilerie}**:"]
-                    section_lines.extend([
-                        f"  - {r.get('nomMachine')} : {r.get('etatMachine')}"
+                for h, machines in huilerie_groups.items():
+                    items = "\n".join(
+                        f"- {_icon(r.get('etatMachine'))} **{r.get('nomMachine')}** — {r.get('etatMachine')}"
                         for r in machines
-                    ])
-                    sections.append("\n".join(section_lines))
-                
-                text = "Liste des machines :\n\n" + "\n\n".join(sections)
-            
+                    )
+                    sections.append(f"**🏭 {h}** ({len(machines)}) :\n{items}")
+
+                text = "\n\n".join(sections)
+
             return IntentResult(text=text, data=rows, structured_payload=None)
+
         else:
-            # Return machines with issues (original behavior)
             result = self.service.get_machines(
                 query.huilerie,
                 query_start_date,
@@ -75,23 +83,23 @@ class MachineHandler(IntentHandler):
                 status_filter=requested_status,
             )
             rows = result.get("value") or []
-            
+
             if not rows:
                 if requested_status:
-                    text = f"Aucune machine en maintenance trouvée."
+                    return IntentResult(text="✅ Aucune machine en maintenance.", data=[], structured_payload=None)
                 else:
-                    text = f"Toutes les machines sont opérationnelles."
-                return IntentResult(text=text, data=[], structured_payload=None)
-            
-            lines = [
-                f"- **{r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')}** : "
+                    return IntentResult(text="✅ Toutes les machines sont opérationnelles.", data=[], structured_payload=None)
+
+            items = "\n".join(
+                f"- {_icon(r.get('etatMachine') or r.get('etat_machine'))} "
+                f"**{r.get('nomMachine') or r.get('nom_machine') or r.get('nom', 'Machine inconnue')}** — "
                 f"{r.get('etatMachine') or r.get('etat_machine') or r.get('etat', 'INCONNU')}"
                 for r in rows
-            ]
-            if requested_status:
-                text = f"Machines en panne (état maintenance) :\n" + "\n".join(lines)
-            else:
-                text = f"Voici les machines:       \n" + "\n".join(lines)
-            
-            return IntentResult(text=text, data=rows, structured_payload=None)
+            )
 
+            if requested_status:
+                text = f"🔧 Machines en panne ({len(rows)}) :\n{items}"
+            else:
+                text = f"🏭 Machines ({len(rows)}) :\n{items}"
+
+            return IntentResult(text=text, data=rows, structured_payload=None)

@@ -7,7 +7,7 @@ from app.services.chat_formatters import _is_chart_request, _normalize_choice, _
 
 # Intents qui NE proposent PAS le choix texte/graphique
 # Ajouter "machine" : l'intent machine doit toujours retourner du texte
-_NO_CHOICE_INTENTS = {"explication", "inconnu", "machine"}
+_NO_CHOICE_INTENTS = {"explication", "inconnu", "machine", "lot_cycle_vie"}
 
 
 def _annotate_fournisseurs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
