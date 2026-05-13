@@ -43,13 +43,16 @@ class ChatbotService:
             "extra",
             "top",
             "a",
+            "vierge",
+            "vierge extra",
+            "vierge supérieure",
         }:
             return "Bonne"
 
         if text in {"moyenne", "moyen", "moyenne qualite", "moyenne qualité", "b"}:
             return "Moyenne"
 
-        if text in {"mauvaise", "mauvais", "mauvaise qualite", "mauvaise qualité", "c", "d"}:
+        if text in {"mauvaise", "mauvais", "mauvaise qualite", "mauvaise qualité", "c", "d", "lampante", "raffinee", "raffinée"}:
             return "Mauvaise"
 
         return "Inconnue"

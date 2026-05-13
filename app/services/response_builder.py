@@ -7,7 +7,7 @@ from app.services.chat_formatters import _is_chart_request, _normalize_choice, _
 
 # Intents qui NE proposent PAS le choix texte/graphique
 # Ajouter "machine" : l'intent machine doit toujours retourner du texte
-_NO_CHOICE_INTENTS = {"explication", "inconnu", "machine", "lot_cycle_vie"}
+_NO_CHOICE_INTENTS = {"explication", "inconnu", "machine", "lot_cycle_vie", "prediction"}
 
 
 def _annotate_fournisseurs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -319,13 +319,6 @@ def _chart_data_for(intent: str, data: Any) -> Any:
     if isinstance(data, list):
         if not data:
             return []
-
-        if intent == "mouvement_stock":
-            compteur: dict[str, int] = {}
-            for row in data:
-                label = str(row.get("type_mouvement") or row.get("lot_ref") or row.get("reference") or row.get("label") or "Inconnu")
-                compteur[label] = compteur.get(label, 0) + 1
-            return [{"label": label, "value": value} for label, value in compteur.items()]
 
         if intent == "fournisseur":
             annotated = _annotate_fournisseurs(data)

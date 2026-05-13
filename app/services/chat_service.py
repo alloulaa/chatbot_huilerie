@@ -23,10 +23,8 @@ from app.services.intent.production import ProductionHandler
 from app.services.intent.rendement import RendementHandler
 from app.services.intent.prediction import PredictionHandler
 from app.services.intent.qualite import QualiteHandler
-from app.services.intent.diagnostic import DiagnosticHandler
 from app.services.intent.campagne import CampagneHandler
 from app.services.intent.reception import ReceptionHandler
-from app.services.intent.mouvement_stock import MouvementStockHandler
 from app.services.query_service import ChatbotService
 from app.nlp.normalizer import resolve_period
 
@@ -66,10 +64,8 @@ class ChatService:
             Intent.COMPARAISON: ComparaisonHandler(self.chatbot_service),
             Intent.EXPLICATION: ExplicationHandler(self.chatbot_service),
             Intent.QUALITE: QualiteHandler(self.chatbot_service),
-            Intent.DIAGNOSTIC: DiagnosticHandler(self.chatbot_service),
             Intent.CAMPAGNE: CampagneHandler(self.chatbot_service),
             Intent.RECEPTION: ReceptionHandler(self.chatbot_service),
-            Intent.MOUVEMENT_STOCK: MouvementStockHandler(self.chatbot_service),
         }
     
     async def process_message(

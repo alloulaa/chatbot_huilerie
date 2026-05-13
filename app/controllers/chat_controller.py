@@ -10,6 +10,7 @@ from app.services.auth_helper import resolve_auth
 from app.services.session_service import SessionService
 from app.services.response_builder import build_chat_response
 from app.services.permission_service import is_huilerie_allowed
+from app.utils.shared import normalize_choice
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

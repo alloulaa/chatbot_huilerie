@@ -29,7 +29,7 @@ class RegexAnalyzer(NLPAnalyzer):
         texte = message.lower().strip()
         intention = Intent.INCONNU
         
-        # --- EXPLICATION (avant diagnostic et lot_cycle_vie) ---
+        # --- EXPLICATION (avant lot_cycle_vie) ---
         # Doit avoir un mot causal/explicatif ET une référence de lot
         has_lot_ref = bool(re.search(r"\blo\s*\d+\b|\blot\s*\d+\b", texte))
         has_causal = any(m in texte for m in [
@@ -81,8 +81,9 @@ class RegexAnalyzer(NLPAnalyzer):
             intention = Intent.LOT_CYCLE_VIE
         
         elif any(m in texte for m in [
-            "machines utilisees", "machine la plus utilisee",
-            "usage machine", "frequence machine", "machines les plus"
+            "machines utilisees", "machine la plus utilisee", "machine la plus utilisé",
+            "usage machine", "frequence machine", "machines les plus", "machine les plus",
+            "les plus utilisees", "la plus utilisee", "utilise", "utliser", "utlisee"
         ]):
             intention = Intent.MACHINES_UTILISEES
 
@@ -108,12 +109,6 @@ class RegexAnalyzer(NLPAnalyzer):
         ]):
             intention = Intent.ANALYSE_LABO
         
-        elif any(m in texte for m in [
-            "mouvement stock", "transfert stock",
-            "entree stock", "sortie stock", "historique stock"
-        ]):
-            intention = Intent.MOUVEMENT_STOCK
-        
         elif (
             any(m in texte for m in ["stock", "inventaire", "quantite disponible", "reserve"])
             and not any(m in texte for m in ["liste lot", "lots", "tracabilite"])
@@ -135,9 +130,6 @@ class RegexAnalyzer(NLPAnalyzer):
             "qualite", "acidite", "peroxyde", "grade huile"
         ]):
             intention = Intent.QUALITE
-        
-        elif any(m in texte for m in ["pourquoi", "diagnostic", "cause", "probleme qualite"]):
-            intention = Intent.DIAGNOSTIC
         
         elif any(m in texte for m in ["prediction", "prevision", "estimation future"]):
             intention = Intent.PREDICTION

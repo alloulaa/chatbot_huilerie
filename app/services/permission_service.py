@@ -21,12 +21,10 @@ INTENT_MODULE_MAP = {
     "rendement": "GUIDE_PRODUCTION",
     "prediction": "GUIDE_PRODUCTION",
     "qualite": "LOTS_TRAÇABILITE",
-    "diagnostic": "LOTS_TRAÇABILITE",
     "fournisseur": "LOTS_TRAÇABILITE",
     "lot_cycle_vie": "LOTS_TRAÇABILITE",
     "lot_liste": "LOTS_TRAÇABILITE",
     "analyse_labo": "LOTS_TRAÇABILITE",
-    "mouvement_stock": "STOCK_MOUVEMENT",
     "reception": "RECEPTION",
     "campagne": "CAMPAGNE_OLIVES",
 }

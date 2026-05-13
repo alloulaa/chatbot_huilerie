@@ -28,6 +28,9 @@ def normalize_quality_label(value: Any) -> str:
         "extra",
         "top",
         "a",
+        "vierge",
+        "vierge extra",
+        "vierge supérieure",
     }:
         return "Bonne"
     if text in {"moyenne", "moyen", "acceptable", "standard", "b"}:
@@ -40,6 +43,9 @@ def normalize_quality_label(value: Any) -> str:
         "médiocre",
         "non conforme",
         "c",
+        "lampante",
+        "raffinee",
+        "raffinée",
     }:
         return "Mauvaise"
     return "Inconnue"
