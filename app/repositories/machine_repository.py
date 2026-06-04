@@ -47,6 +47,7 @@ class MachineRepository:
         if huilerie:
             query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
+            params.append(huilerie)
         query += " ORDER BY h.nom, m.nom_machine"
 
         connection = None
@@ -133,6 +134,7 @@ class MachineRepository:
         if huilerie:
             query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
+            params.append(huilerie)
         query += " ORDER BY m.nom_machine"
 
         connection = None
@@ -202,13 +204,17 @@ class MachineRepository:
                 JOIN huilerie h2 ON h2.id_huilerie = lo.huilerie_id
                 WHERE et.machine_id IS NOT NULL
         """
+        # APRÈS
         subquery_params: list[Any] = []
         subquery_filters: list[str] = []
         if enterprise_id is not None:
             subquery_filters.append("h2.entreprise_id = %s")
             subquery_params.append(enterprise_id)
         if huilerie:
-            subquery_filters.append("LOWER(h2.nom) = LOWER(%s)")
+            subquery_filters.append(
+                "(LOWER(h2.nom) = LOWER(%s) OR LOWER(h2.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
+            )
+            subquery_params.append(huilerie)
             subquery_params.append(huilerie)
         if start_date and end_date:
             subquery_filters.append("ep.date_debut BETWEEN %s AND %s")
@@ -224,6 +230,7 @@ class MachineRepository:
             outer_params.append(enterprise_id)
         if huilerie:
             query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
+            outer_params.append(huilerie)
             outer_params.append(huilerie)
         query += " ORDER BY m.nom_machine ASC"
 

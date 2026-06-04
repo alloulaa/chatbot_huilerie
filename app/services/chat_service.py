@@ -126,9 +126,17 @@ class ChatService:
                         "data": None,
                         "error": "huilerie_not_allowed"
                     }
+           # APRÈS
             else:
                 # Non-admin: can ONLY access their own huilerie
-                if not huilerie or resolved_huilerie.lower() != huilerie.lower():
+                # Check with contains to handle partial matches (e.g. "nord" in "Huilerie de nord")
+                user_h_lower = (huilerie or "").lower()
+                resolved_lower = resolved_huilerie.lower()
+                if not huilerie or (
+                    resolved_lower != user_h_lower
+                    and user_h_lower not in resolved_lower
+                    and resolved_lower not in user_h_lower
+                ):
                     logger.warning(f"Access denied - non-admin user {huilerie} tried to access {resolved_huilerie}")
                     return {
                         "intent": intent.value,

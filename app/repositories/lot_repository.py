@@ -48,6 +48,7 @@ class LotRepository:
         if huilerie:
             query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
+            params.append(huilerie)
         if start_date and end_date:
             query += " AND lo.date_reception BETWEEN %s AND %s"
             params.extend([start_date, end_date])
@@ -145,6 +146,7 @@ class LotRepository:
             params.append(enterprise_id)
         if huilerie:
             query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
+            params.append(huilerie)
             params.append(huilerie)
         if start_date and end_date:
             query += " AND al.date_analyse BETWEEN %s AND %s"
@@ -255,6 +257,7 @@ class LotRepository:
         if huilerie:
             query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
+            params.append(huilerie)
         if start_date and end_date:
             query += " AND lo.date_reception BETWEEN %s AND %s"
             params.extend([start_date, end_date])
@@ -323,6 +326,7 @@ class LotRepository:
             params.append(enterprise_id)
         if huilerie:
             query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
+            params.append(huilerie)
             params.append(huilerie)
         if annee:
             annee_filtre = str(annee).strip()
@@ -402,6 +406,7 @@ class LotRepository:
                 params.append(enterprise_id)
             if huilerie:
                 query +=" AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))" 
+                params.append(huilerie)
                 params.append(huilerie)
             if start_date and end_date:
                 query += " AND sm.date_mouvement BETWEEN %s AND %s"
