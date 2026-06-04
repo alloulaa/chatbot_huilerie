@@ -130,13 +130,15 @@ def is_huilerie_allowed(
         cursor = connection.cursor(dictionary=True)
         
         # Query: check if huilerie with given name belongs to the enterprise
+        # First try exact match, then partial match (LIKE) for flexibility
         query = """
             SELECT h.id_huilerie, h.entreprise_id
             FROM huilerie h
             WHERE LOWER(h.nom) = LOWER(%s)
+               OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%'))
             LIMIT 1
         """
-        cursor.execute(query, (huilerie_name,))
+        cursor.execute(query, (huilerie_name, huilerie_name))
         row = cursor.fetchone()
         
         if not row:
@@ -145,8 +147,12 @@ def is_huilerie_allowed(
             return False
         
         huilerie_enterprise_id = row.get("entreprise_id")
+        logger.info("RBAC check: huilerie='%s', huilerie_enterprise_id=%s, user_enterprise_id=%s", 
+                    huilerie_name, huilerie_enterprise_id, enterprise_id)
         if huilerie_enterprise_id != enterprise_id:
             # Huilerie found but belongs to different enterprise
+            logger.warning("Huilerie '%s' (enterprise %s) does not belong to user's enterprise %s", 
+                           huilerie_name, huilerie_enterprise_id, enterprise_id)
             logger.warning(
                 "Huilerie '%s' (enterprise %s) access denied for user in enterprise %s",
                 huilerie_name, huilerie_enterprise_id, enterprise_id

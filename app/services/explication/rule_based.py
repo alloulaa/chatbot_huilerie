@@ -37,6 +37,20 @@ def _rule_based_explanation(lot_data: dict, user_question: str) -> str:
     latest_analysis = _latest_by(analyses, "date_analyse") or (analyses[0] if analyses else None)
     final_output = _latest_by(production_outputs, "date_production") or (production_outputs[0] if production_outputs else None)
     
+    # ── Déterminer la qualité en haut ─────────────────────────────────────
+    quality_header = ""
+    if final_output and final_output.get("qualite"):
+        quality = str(final_output.get("qualite")).strip()
+        quality_header = f"**Qualité du lot {lot_ref} : {quality}**\n\n"
+    elif analyses:
+        a = analyses[0]
+        acid = _safe_float(a.get("acidite_huile_pourcent"))
+        perox = _safe_float(a.get("indice_peroxyde_meq_o2_kg"))
+        k270 = _safe_float(a.get("k270"))
+        grade = _grade_huile(acid, perox, k270)
+        if grade:
+            quality_header = f"**Qualité du lot {lot_ref} : {grade}**\n\n"
+    
     # Durée de stockage (gère plusieurs schémas de colonnes)
     duree_stockage = _safe_float(lot.get("duree_stockage_jours"))
     if duree_stockage == 0:
@@ -428,28 +442,70 @@ def _rule_based_explanation(lot_data: dict, user_question: str) -> str:
         narration_lines.append(summary_line)
         narration_lines.append("")
     
-    # Énumérer les raisons causales
-    filtered_reasons = [
-        reason for reason in causal_reasons
-        if "incohérence de données" not in reason.lower()
-    ]
-    if filtered_reasons:
-        for reason in filtered_reasons:
-            narration_lines.append(f"• {reason},")
+    # ── Traitement différencié selon la qualité ──────────────────────────
+    if qualite_judgement == "bonne":
+        # BONNE qualité: mettre l'accent sur les points positifs
+        if points_positifs:
+            narration_lines.append("Les facteurs contribuant à cette excellente qualité :")
+            for point in points_positifs:
+                narration_lines.append(f"• {point},")
+            narration_lines.append("")
+        
+        # Ajouter les raisons négatives s'il y en a (malgré la bonne qualité)
+        filtered_reasons = [
+            reason for reason in causal_reasons
+            if "incohérence de données" not in reason.lower()
+        ]
+        if filtered_reasons:
+            narration_lines.append("Facteurs à surveiller pour maintenir cette qualité :")
+            for reason in filtered_reasons[:3]:
+                narration_lines.append(f"• {reason},")
+            narration_lines.append("")
+    
+    elif qualite_judgement == "moyenne":
+        # MOYENNE qualité: approche équilibrée (points positifs ET négatifs)
+        if points_positifs:
+            narration_lines.append("Points positifs :")
+            for point in points_positifs:
+                narration_lines.append(f"• {point},")
+            narration_lines.append("")
+        
+        filtered_reasons = [
+            reason for reason in causal_reasons
+            if "incohérence de données" not in reason.lower()
+        ]
+        if filtered_reasons:
+            narration_lines.append("Domaines à améliorer pour atteindre Vierge Extra :")
+            for reason in filtered_reasons[:5]:  # Top 5 pour la qualité moyenne
+                narration_lines.append(f"• {reason},")
+            narration_lines.append("")
+        elif not points_positifs:
+            narration_lines.append("• données insuffisantes pour identifier les facteurs spécifiques.")
+            narration_lines.append("")
+    
     else:
-        narration_lines.append("• données insuffisantes pour identifier les causes spécifiques.")
-    
-    narration_lines.append("")
-    
-    # Résumé des points positifs s'il y en a
-    if points_positifs:
-        narration_lines.append("Cependant, quelques points positifs :")
-        for point in points_positifs:
-            narration_lines.append(f"• {point}")
+        # MAUVAISE qualité: énumérer les causes négatives
+        filtered_reasons = [
+            reason for reason in causal_reasons
+            if "incohérence de données" not in reason.lower()
+        ]
+        if filtered_reasons:
+            for reason in filtered_reasons:
+                narration_lines.append(f"• {reason},")
+        else:
+            narration_lines.append("• données insuffisantes pour identifier les causes spécifiques.")
+        
         narration_lines.append("")
+        
+        # Résumé des points positifs s'il y en a
+        if points_positifs:
+            narration_lines.append("Cependant, quelques points positifs :")
+            for point in points_positifs:
+                narration_lines.append(f"• {point}")
+            narration_lines.append("")
     
     # Recommandations
-    narration_lines.append("Recommandations pour améliorer la qualité :")
+    narration_lines.append("Recommandations :")
     recs = []
     
     causal_str = " ".join(causal_reasons)
@@ -474,6 +530,12 @@ def _rule_based_explanation(lot_data: dict, user_question: str) -> str:
         for rec in recs[:3]:  # Top 3 recommendations
             narration_lines.append(rec)
     else:
-        narration_lines.append("• Maintenir les pratiques actuelles qui donnent de bons résultats")
+        if qualite_judgement == "bonne":
+            narration_lines.append("• Maintenir les pratiques actuelles qui donnent d'excellents résultats")
+        elif qualite_judgement == "moyenne":
+            narration_lines.append("• Optimiser les conditions de récolte et de trituration pour passer à Vierge Extra")
+        else:
+            narration_lines.append("• Maintenir les pratiques actuelles qui donnent de bons résultats")
 
-    return "\n".join(narration_lines)
+    final_text = "\n".join(narration_lines)
+    return quality_header + final_text if quality_header else final_text

@@ -101,8 +101,8 @@ class ChatService:
         # Step 2: Intent Override (basé sur keywords du message)
         intent = self._apply_intent_overrides(intent, message)
         
-        # Step 3: RBAC Check
-        from app.services.permission_service import is_intent_allowed
+        # Step 3: RBAC Check on Intent
+        from app.services.permission_service import is_intent_allowed, is_huilerie_allowed
         if auth_available and not user_is_admin and not is_intent_allowed(intent.value, permissions):
             logger.warning(f"Permission denied for intent: {intent}")
             return {
@@ -112,6 +112,31 @@ class ChatService:
                 "data": None,
                 "error": "permission_denied"
             }
+        
+        # Step 3b: RBAC Check on Huilerie (NEW!)
+        if auth_available and resolved_huilerie:
+            if user_is_admin:
+                # Admin: can access any huilerie of their enterprise
+                if not is_huilerie_allowed(resolved_huilerie, enterprise_id):
+                    logger.warning(f"Access denied - huilerie {resolved_huilerie} doesn't belong to enterprise {enterprise_id}")
+                    return {
+                        "intent": intent.value,
+                        "confidence": nlp_result.confiance,
+                        "text": f"Vous n'avez pas accès aux données de **{resolved_huilerie}** (hors de votre entreprise).",
+                        "data": None,
+                        "error": "huilerie_not_allowed"
+                    }
+            else:
+                # Non-admin: can ONLY access their own huilerie
+                if not huilerie or resolved_huilerie.lower() != huilerie.lower():
+                    logger.warning(f"Access denied - non-admin user {huilerie} tried to access {resolved_huilerie}")
+                    return {
+                        "intent": intent.value,
+                        "confidence": nlp_result.confiance,
+                        "text": f"Vous n'avez accès qu'aux données de votre huilerie (**{huilerie}**). Accès refusé pour **{resolved_huilerie}**.",
+                        "data": None,
+                        "error": "huilerie_not_allowed"
+                    }
         
         # Step 4: Determine period handling
         explicit_period = nlp_result.periode is not None or self._has_period_keyword(message)

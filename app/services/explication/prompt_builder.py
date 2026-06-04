@@ -69,6 +69,8 @@ def _build_expert_prompt(lot_data: dict, user_question: str) -> str:
         "Ne recopie pas les informations brutes du lot en ouverture : va directement à l'analyse,",
         "avec un langage humain, naturel et concret.",
         "",
+        f"## Qualité du lot\n**Grade : {grade}**",
+        "",
         f"## Question de l'utilisateur\n{user_question}",
         "",
         "## Données collectées",

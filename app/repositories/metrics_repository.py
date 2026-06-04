@@ -35,7 +35,8 @@ class MetricsRepository:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
+            params.append(huilerie)
             params.append(huilerie)
         if start_date and end_date:
             query += " AND lo.date_reception BETWEEN %s AND %s"
@@ -91,7 +92,7 @@ class MetricsRepository:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
         if start_date and end_date:
             query += " AND pf.date_production BETWEEN %s AND %s"
@@ -135,7 +136,8 @@ class MetricsRepository:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
+            params.append(huilerie)
             params.append(huilerie)
         if start_date and end_date:
             query += " AND ep.date_debut BETWEEN %s AND %s"
@@ -180,7 +182,7 @@ class MetricsRepository:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
         if start_date and end_date:
             query += " AND ep.date_debut BETWEEN %s AND %s"
@@ -232,7 +234,8 @@ class MetricsRepository:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
+            params.append(huilerie)
             params.append(huilerie)
         if start_date and end_date:
             query += " AND pf.date_production BETWEEN %s AND %s"
@@ -293,7 +296,7 @@ class MetricsRepository:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
         if start_date and end_date:
             query += " AND al.date_analyse BETWEEN %s AND %s"

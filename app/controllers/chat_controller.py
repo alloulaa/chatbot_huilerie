@@ -77,7 +77,7 @@ async def ask_chatbot(
     service_result = await chat_service.process_message(
         message=payload.message,
         session_id=payload.session_id,
-        huilerie=None,  # ChatService extracts from NLP
+        huilerie=user_huilerie,  # Pass user's huilerie for RBAC validation
         enterprise_id=user_enterprise_id,
         permissions=auth.permissions,
         user_is_admin=user_is_admin,

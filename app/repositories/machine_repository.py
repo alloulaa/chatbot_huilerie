@@ -45,7 +45,7 @@ class MachineRepository:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
         query += " ORDER BY h.nom, m.nom_machine"
 
@@ -131,7 +131,7 @@ class MachineRepository:
             query += " AND h.entreprise_id = %s"
             params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             params.append(huilerie)
         query += " ORDER BY m.nom_machine"
 
@@ -223,7 +223,7 @@ class MachineRepository:
             query += " AND h.entreprise_id = %s"
             outer_params.append(enterprise_id)
         if huilerie:
-            query += " AND LOWER(h.nom) = LOWER(%s)"
+            query += " AND (LOWER(h.nom) = LOWER(%s) OR LOWER(h.nom) LIKE LOWER(CONCAT('%', %s, '%')))"
             outer_params.append(huilerie)
         query += " ORDER BY m.nom_machine ASC"
 

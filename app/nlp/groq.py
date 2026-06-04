@@ -163,21 +163,13 @@ class GroqAnalyzer(NLPAnalyzer):
         self.model = GROQ_MODEL
     
     async def analyze(self, message: str) -> NLPResult:
-        """Analyser un message avec Groq API."""
+        """Analyser un message avec Groq API (priorité Groq)."""
         if not self.api_key:
             logger.warning("GROQ_API_KEY absent. Utilisation du fallback regex.")
             from app.nlp.regex_analyzer import RegexAnalyzer
             return await RegexAnalyzer().analyze(message)
         
-        # Pré-détection rapide avec regex pour les cas simples
-        from app.nlp.regex_analyzer import RegexAnalyzer
-        regex_result = await RegexAnalyzer().analyze(message)
-        
-        # Si regex détecte une intention claire (confiance >= 0.8), l'utiliser
-        if regex_result.intention != Intent.INCONNU and self._is_high_confidence(message, regex_result.intention):
-            logger.info(f"Regex pre-detection matched: {regex_result.intention.value} (high confidence)")
-            return regex_result
-        
+        # GROQ EN PREMIER - appel direct sans pré-détection regex
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.post(
@@ -207,39 +199,15 @@ class GroqAnalyzer(NLPAnalyzer):
                     raise ValueError("Groq response is not a dict")
                 
                 groq_result = self._normalize_result(result)
-                
-                # Si Groq retourne "inconnu" avec faible confiance, recourir au regex
-                if (groq_result.intention == Intent.INCONNU and 
-                    groq_result.confiance < 0.6 and 
-                    regex_result.intention != Intent.INCONNU):
-                    logger.info(f"Groq returned 'inconnu' with low confidence. Using regex result: {regex_result.intention.value}")
-                    return regex_result
-                
+                logger.info(f"Groq analysis succeeded: {groq_result.intention.value} (confidence: {groq_result.confiance})")
                 return groq_result
                 
         except Exception as error:
             logger.warning("Groq analysis failed: %s - falling back to regex", error)
+            from app.nlp.regex_analyzer import RegexAnalyzer
+            regex_result = await RegexAnalyzer().analyze(message)
+            logger.info(f"Regex fallback matched: {regex_result.intention.value}")
             return regex_result
-    
-    @staticmethod
-    def _is_high_confidence(message: str, intention: Intent) -> bool:
-        """Vérifier si le regex result a une confiance élevée pour cette intention."""
-        texte = message.lower()
-        
-        # Keywords qui indiquent une haute confiance
-        high_confidence_keywords = {
-            Intent.QUALITE: ["qualite", "qualité", "grade huile"],
-            Intent.PREDICTION: ["prediction", "prevision", "estimation"],
-            Intent.STOCK: ["stock", "inventaire", "quantite disponible"],
-            Intent.PRODUCTION: ["production", "huile produite", "litres produits"],
-            Intent.RENDEMENT: ["rendement", "performance"],
-            Intent.MACHINE: ["machine", "panne", "maintenance"],
-            Intent.MACHINES_UTILISEES: ["utilise", "utliser", "utlisee", "les plus utilisees", "machine les plus"],
-            Intent.ANALYSE_LABO: ["analyse labo", "k270", "k232", "polyphenol", "peroxyde"],
-        }
-        
-        keywords = high_confidence_keywords.get(intention, [])
-        return any(kw in texte for kw in keywords)
     
     @staticmethod
     def _normalize_result(result: dict) -> NLPResult:

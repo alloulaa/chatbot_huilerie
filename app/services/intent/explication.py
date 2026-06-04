@@ -153,6 +153,32 @@ class ExplicationHandler(IntentHandler):
             explanation_text = _humanize_explanation_text(_rule_based_explanation(lot_data, user_question))
             logger.info("Rule-based fallback explanation for lot %s", normalized_ref)
 
+        # ── Déterminer la qualité du lot pour l'afficher en haut ─────────
+        quality_header = ""
+        production_outputs = lot_data.get("production_outputs") or []
+        analyses = lot_data.get("analyses") or []
+        
+        if production_outputs:
+            final_output = production_outputs[-1] if production_outputs else None
+            if final_output and final_output.get("qualite"):
+                quality = str(final_output.get("qualite")).strip()
+                quality_header = f"**Qualité du lot {normalized_ref} : {quality}**\n\n"
+        
+        if not quality_header and analyses:
+            # Fallback: déduire de l'analyse labo
+            a = analyses[0]
+            acid = _safe_float(a.get("acidite_huile_pourcent"))
+            perox = _safe_float(a.get("indice_peroxyde_meq_o2_kg"))
+            k270 = _safe_float(a.get("k270"))
+            from app.domain.oleiculture import _grade_huile
+            grade = _grade_huile(acid, perox, k270)
+            if grade:
+                quality_header = f"**Qualité du lot {normalized_ref} : {grade}**\n\n"
+        
+        # Ajouter la qualité au début du message
+        if quality_header:
+            explanation_text = quality_header + explanation_text
+
         # ── Payload chart (paramètres labo vs seuils) ─────────────────────
         structured_payload = None
         analyses = lot_data.get("analyses") or []
