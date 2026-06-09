@@ -35,10 +35,10 @@ Prototype FastAPI prêt à tester pour une plateforme web de gestion des huileri
 python -m venv .venv
 source .venv/bin/activate
 # Sous Windows:
-# .venv\Scripts\activate
+# .venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 Si vous utilisez un microservice de prédiction séparé, vous pouvez préciser son URL avec :
@@ -52,6 +52,11 @@ Puis ouvrir :
 ```text
 http://127.0.0.1:8001/
 ```
+
+## Dépannage Windows
+- Si `.venv` est verrouillé ou corrompu, créez un nouvel environnement avec un autre nom, par exemple `.venv_new`, puis activez-le avec `.venv_new\Scripts\Activate.ps1`.
+- Si `uvicorn` renvoie `WinError 10013`, relancez-le avec `--host 127.0.0.1 --port 8001`.
+- Sous PowerShell, si l'activation est bloquée par l'exécution des scripts, lancez d'abord : `Set-ExecutionPolicy -Scope Process RemoteSigned`.
 
 ## API
 ### POST /chat/ask
